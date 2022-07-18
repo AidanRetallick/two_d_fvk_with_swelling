@@ -1,0 +1,13 @@
+L1           10
+L2           1
+thickness    0.0054
+nu           0.495
+eta          310689
+
+L_dim        0.005
+E_dim        1.2139e+06
+P_dim        0.0210984
+
+Element area 0.05
+N_xedgenodes 77
+N_yedgenodes 10
