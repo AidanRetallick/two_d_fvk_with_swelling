@@ -58,5 +58,5 @@ euler_column_buckling_fvk_LDADD = -L@libdir@ -lC1_foeppl_von_karman \
 # Automake will replace the variable @includedir@ with the actual
 # include directory.
 
-AM_CPPFLAGS += -I@includedir@ -I$(pathtoeigen) -I$(pathtospectra) -Wall -g -DRANGE_CHECK -DPARANOID
+AM_CPPFLAGS += -I@includedir@ -Wall -ggdb3 -g -DRANGE_CHECKING -DPARANOIA -O3
 #EXTRA_DIST = Circle1.1.ele Circle1.1.node Circle1.1.poly

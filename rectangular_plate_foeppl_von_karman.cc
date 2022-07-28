@@ -49,6 +49,7 @@ namespace Params
  double L2 = 1.0;
  double thickness = 0.0054;
  double nu = 0.495;
+ double mu = 0.1;
  double eta = 12*(1-nu*nu) / (thickness*thickness);
  // Control parameters
  double p_mag = 0.0;
@@ -268,6 +269,8 @@ UnstructuredFvKProblem<ELEMENT>::UnstructuredFvKProblem()
  :
  Element_area(Params::element_area)
 {
+ add_time_stepper_pt(new BDF<2>);
+ 
  Problem::Always_take_one_newton_step = true;
  // Build the mesh
  build_mesh();
@@ -377,7 +380,7 @@ void UnstructuredFvKProblem<ELEMENT>::build_mesh()
  Triangle_mesh_parameters.element_area()=Element_area;
  
  // Build an assign bulk mesh
- Bulk_mesh_pt=new TriangleMesh<ELEMENT>(Triangle_mesh_parameters);
+ Bulk_mesh_pt=new TriangleMesh<ELEMENT>(Triangle_mesh_parameters, time_stepper_pt());
  
  // Create "surface mesh" that will contain only the prescribed-traction
  // elements. The constructor creates the mesh without adding any nodes
@@ -422,6 +425,7 @@ void UnstructuredFvKProblem<ELEMENT>::complete_problem_setup()
    // There is no error metric in this case
    el_pt->error_metric_fct_pt() = &Params::axiasymmetry_metric;
    el_pt->nu_pt() = &Params::nu;
+   el_pt->mu_pt() = &Params::mu;
    el_pt->eta_pt() = &Params::eta;
   }
  // Set the boundary conditions
@@ -498,17 +502,17 @@ void UnstructuredFvKProblem<ELEMENT>::adaptive_swell_solve(double c_inc)
  // Min number of newton iterations before increasing step size
  unsigned min_desired_iterations = 5;
 
- // Step size refinement multiplier
- double refinement_const = 2.0/3.0;
-
  // Step size relaxation multiplier
  double relaxation_const = 3.0/2.0;
+
+ // Step size refinement multiplier
+ double refinement_const = relaxation_const*relaxation_const;
 
  // Set absolute largest allowed value for dh
  double c_inc_max = 3.0*c_inc;
    
  // Set absolute smallest allowed value for dh
- double c_inc_min = c_inc / 100.0;
+ double c_inc_min = c_inc / 1000.0;
 
  // Are things getting silly?
  bool getting_silly = false;
@@ -615,7 +619,7 @@ void UnstructuredFvKProblem<ELEMENT>::adaptive_swell_solve(double c_inc)
 
 
 //==start of arclength_swell_solve=========================================
-/// Try to swell the membrane adaptively
+/// Try to swell the membrane using pseudo-arclength continuation.
 //========================================================================
 template<class ELEMENT>
 void UnstructuredFvKProblem<ELEMENT>::arclength_swell_solve(double c_inc)
@@ -698,7 +702,7 @@ void UnstructuredFvKProblem<ELEMENT>::doc_solution(const
  some_file.close();
 
  // Number of plot points
- npts = 20;
+ npts = 5;
 
  tempstring = Params::output_dir + "/soln" + std::to_string(Doc_info.number()) + ".dat";
  strcpy(filename, tempstring.c_str());
@@ -799,7 +803,7 @@ int main(int argc, char **argv)
 					    &Params::c_swell);
 
  // Element Area (no larger element than)
- Params::element_area=0.02;
+ Params::element_area=0.01;
  CommandLineArgs::specify_command_line_flag("--element_area",
 					    &Params::element_area);
 
@@ -823,32 +827,43 @@ int main(int argc, char **argv)
  problem.max_residuals()=1e4;
  problem.max_newton_iterations()=30;
 
+ double dt = 0.00001;
+ double t_max = 10*dt;
+ problem.initialise_dt(dt);
+
  double p_inc = 10.0;
- double c_inc = 0.001;
+ //double c_inc = 0.001;
  
  // INITIAL SOLVE
- problem.newton_solve(); // SOLVE
+ problem.steady_newton_solve(); // SOLVE
  problem.doc_solution(); // AND DOCUMENT
 
- 
  // INFLATION
  Params::p_mag+=p_inc;   // 10
- problem.newton_solve(); // SOLVE
- // problem.doc_solution(); // AND DOCUMENT 
- Params::p_mag*=10;      // 100
- problem.newton_solve(); // SOLVE
- // problem.doc_solution(); // AND DOCUMENT
- Params::p_mag*=10;      // 1000
- problem.newton_solve(); // SOLVE
- // problem.doc_solution(); // AND DOCUMENT
- Params::p_mag*=2;       // 5000
- problem.newton_solve(); // SOLVE
- // problem.doc_solution(); // AND DOCUMENT
- Params::p_mag*=5;       // 10000
- problem.newton_solve(); // SOLVE
- // problem.doc_solution(); // AND DOCUMENT
- Params::p_mag=24000;    // (500Pa)
- problem.newton_solve(); // SOLVE
+ // problem.steady_newton_solve(); // SOLVE
+ //problem.doc_solution(); // AND DOCUMENT 
+ 
+ //Params::p_mag=0.0;
+ unsigned nstep = unsigned(t_max/dt);
+ for(unsigned istep=0; istep<nstep; istep++)
+  {
+   problem.unsteady_newton_solve(dt);
+   problem.doc_solution();
+  }
+ // Params::p_mag*=10;      // 100
+ // problem.newton_solve(); // SOLVE
+ // // problem.doc_solution(); // AND DOCUMENT
+ // Params::p_mag*=10;      // 1000
+ // problem.newton_solve(); // SOLVE
+ // // problem.doc_solution(); // AND DOCUMENT
+ // Params::p_mag*=2;       // 5000
+ // problem.newton_solve(); // SOLVE
+ // // problem.doc_solution(); // AND DOCUMENT
+ // Params::p_mag*=5;       // 10000
+ // problem.newton_solve(); // SOLVE
+ // // problem.doc_solution(); // AND DOCUMENT
+ // Params::p_mag=24000;    // (500Pa)
+ // problem.newton_solve(); // SOLVE
  problem.doc_solution(); // AND DOCUMENT
  // Params::p_mag=48000;    // (1500Pa)
  // problem.newton_solve(); // SOLVE
@@ -856,7 +871,7 @@ int main(int argc, char **argv)
 
 
  // SWELLING LOOP
- problem.arclength_swell_solve(c_inc);
+ //problem.arclength_swell_solve(c_inc);
 
 
  // Print success
