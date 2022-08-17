@@ -91,8 +91,8 @@ host_triplet = @host@
 noinst_PROGRAMS = square_free_swelling$(EXEEXT) \
 	clamped_square_inflation$(EXEEXT) \
 	rectangular_plate_fvk$(EXEEXT) infinite_strip_fvk$(EXEEXT) \
-	euler_column_buckling_fvk$(EXEEXT)
-subdir = user_drivers/animated-octo-fiesta
+	euler_column_buckling_fvk$(EXEEXT) circular_disc_fvk$(EXEEXT)
+subdir = user_drivers/two_d_fvk_with_swelling
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/config/configure.ac_scripts/automake_init_command_file \
 	$(top_srcdir)/config/configure.ac_scripts/makefile_list \
@@ -105,17 +105,21 @@ CONFIG_HEADER = $(top_builddir)/config.h
 CONFIG_CLEAN_FILES =
 CONFIG_CLEAN_VPATH_FILES =
 PROGRAMS = $(noinst_PROGRAMS)
-am_clamped_square_inflation_OBJECTS =  \
-	clamped_square_inflation.$(OBJEXT)
-clamped_square_inflation_OBJECTS =  \
-	$(am_clamped_square_inflation_OBJECTS)
+am_circular_disc_fvk_OBJECTS = circular_disc_fvk.$(OBJEXT)
+circular_disc_fvk_OBJECTS = $(am_circular_disc_fvk_OBJECTS)
 am__DEPENDENCIES_1 =
-clamped_square_inflation_DEPENDENCIES = $(am__DEPENDENCIES_1) \
+circular_disc_fvk_DEPENDENCIES = $(am__DEPENDENCIES_1) \
 	$(am__DEPENDENCIES_1)
 AM_V_lt = $(am__v_lt_@AM_V@)
 am__v_lt_ = $(am__v_lt_@AM_DEFAULT_V@)
 am__v_lt_0 = --silent
 am__v_lt_1 = 
+am_clamped_square_inflation_OBJECTS =  \
+	clamped_square_inflation.$(OBJEXT)
+clamped_square_inflation_OBJECTS =  \
+	$(am_clamped_square_inflation_OBJECTS)
+clamped_square_inflation_DEPENDENCIES = $(am__DEPENDENCIES_1) \
+	$(am__DEPENDENCIES_1)
 am_euler_column_buckling_fvk_OBJECTS =  \
 	euler_column_buckling_foeppl_von_karman.$(OBJEXT)
 euler_column_buckling_fvk_OBJECTS =  \
@@ -151,7 +155,8 @@ am__v_at_1 =
 DEFAULT_INCLUDES = -I.@am__isrc@ -I$(top_builddir)
 depcomp = $(SHELL) $(top_srcdir)/depcomp
 am__maybe_remake_depfiles = depfiles
-am__depfiles_remade = ./$(DEPDIR)/clamped_square_inflation.Po \
+am__depfiles_remade = ./$(DEPDIR)/circular_disc_fvk.Po \
+	./$(DEPDIR)/clamped_square_inflation.Po \
 	./$(DEPDIR)/euler_column_buckling_foeppl_von_karman.Po \
 	./$(DEPDIR)/infinite_strip_foeppl_von_karman.Po \
 	./$(DEPDIR)/rectangular_plate_foeppl_von_karman.Po \
@@ -174,11 +179,13 @@ AM_V_CXXLD = $(am__v_CXXLD_@AM_V@)
 am__v_CXXLD_ = $(am__v_CXXLD_@AM_DEFAULT_V@)
 am__v_CXXLD_0 = @echo "  CXXLD   " $@;
 am__v_CXXLD_1 = 
-SOURCES = $(clamped_square_inflation_SOURCES) \
+SOURCES = $(circular_disc_fvk_SOURCES) \
+	$(clamped_square_inflation_SOURCES) \
 	$(euler_column_buckling_fvk_SOURCES) \
 	$(infinite_strip_fvk_SOURCES) $(rectangular_plate_fvk_SOURCES) \
 	$(square_free_swelling_SOURCES)
-DIST_SOURCES = $(clamped_square_inflation_SOURCES) \
+DIST_SOURCES = $(circular_disc_fvk_SOURCES) \
+	$(clamped_square_inflation_SOURCES) \
 	$(euler_column_buckling_fvk_SOURCES) \
 	$(infinite_strip_fvk_SOURCES) $(rectangular_plate_fvk_SOURCES) \
 	$(square_free_swelling_SOURCES)
@@ -258,7 +265,7 @@ AMTAR = @AMTAR@
 # Automake will replace the variable @includedir@ with the actual
 # include directory.
 AM_CPPFLAGS = @AM_CPPFLAGS@ -I@includedir@ -I@includedir@ -Wall -ggdb3 \
-	-g -DRANGE_CHECKING -DPARANOIA -O3
+	-g -O3
 AM_CXXFLAGS = @AM_CXXFLAGS@
 AM_DEFAULT_VERBOSITY = @AM_DEFAULT_VERBOSITY@
 AM_FFLAGS = @AM_FFLAGS@
@@ -461,6 +468,8 @@ infinite_strip_fvk_SOURCES = \
 euler_column_buckling_fvk_SOURCES = \
  euler_column_buckling_foeppl_von_karman.cc
 
+circular_disc_fvk_SOURCES = \
+ circular_disc_fvk.cc
 
 #---------------------------------------------------------------------------
 square_free_swelling_LDADD = -L@libdir@ -lC1_foeppl_von_karman \
@@ -478,6 +487,9 @@ infinite_strip_fvk_LDADD = -L@libdir@ -lC1_foeppl_von_karman \
 euler_column_buckling_fvk_LDADD = -L@libdir@ -lC1_foeppl_von_karman \
  -lC1_basis -lgeneric $(EXTERNAL_LIBS) $(FLIBS)
 
+circular_disc_fvk_LDADD = -L@libdir@ -lC1_foeppl_von_karman \
+ -lC1_basis -lgeneric $(EXTERNAL_LIBS) $(FLIBS)
+
 all: all-am
 
 .SUFFIXES:
@@ -491,9 +503,9 @@ $(srcdir)/Makefile.in:  $(srcdir)/Makefile.am $(top_srcdir)/config/makefile_temp
 	      exit 1;; \
 	  esac; \
 	done; \
-	echo ' cd $(top_srcdir) && $(AUTOMAKE) --foreign user_drivers/animated-octo-fiesta/Makefile'; \
+	echo ' cd $(top_srcdir) && $(AUTOMAKE) --foreign user_drivers/two_d_fvk_with_swelling/Makefile'; \
 	$(am__cd) $(top_srcdir) && \
-	  $(AUTOMAKE) --foreign user_drivers/animated-octo-fiesta/Makefile
+	  $(AUTOMAKE) --foreign user_drivers/two_d_fvk_with_swelling/Makefile
 Makefile: $(srcdir)/Makefile.in $(top_builddir)/config.status
 	@case '$?' in \
 	  *config.status*) \
@@ -522,6 +534,10 @@ clean-noinstPROGRAMS:
 	echo " rm -f" $$list; \
 	rm -f $$list
 
+circular_disc_fvk$(EXEEXT): $(circular_disc_fvk_OBJECTS) $(circular_disc_fvk_DEPENDENCIES) $(EXTRA_circular_disc_fvk_DEPENDENCIES) 
+	@rm -f circular_disc_fvk$(EXEEXT)
+	$(AM_V_CXXLD)$(CXXLINK) $(circular_disc_fvk_OBJECTS) $(circular_disc_fvk_LDADD) $(LIBS)
+
 clamped_square_inflation$(EXEEXT): $(clamped_square_inflation_OBJECTS) $(clamped_square_inflation_DEPENDENCIES) $(EXTRA_clamped_square_inflation_DEPENDENCIES) 
 	@rm -f clamped_square_inflation$(EXEEXT)
 	$(AM_V_CXXLD)$(CXXLINK) $(clamped_square_inflation_OBJECTS) $(clamped_square_inflation_LDADD) $(LIBS)
@@ -548,6 +564,7 @@ mostlyclean-compile:
 distclean-compile:
 	-rm -f *.tab.c
 
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/circular_disc_fvk.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/clamped_square_inflation.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/euler_column_buckling_foeppl_von_karman.Po@am__quote@ # am--include-marker
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/infinite_strip_foeppl_von_karman.Po@am__quote@ # am--include-marker
@@ -806,7 +823,8 @@ clean-am: clean-generic clean-libtool clean-local clean-noinstPROGRAMS \
 	mostlyclean-am
 
 distclean: distclean-am
-		-rm -f ./$(DEPDIR)/clamped_square_inflation.Po
+		-rm -f ./$(DEPDIR)/circular_disc_fvk.Po
+	-rm -f ./$(DEPDIR)/clamped_square_inflation.Po
 	-rm -f ./$(DEPDIR)/euler_column_buckling_foeppl_von_karman.Po
 	-rm -f ./$(DEPDIR)/infinite_strip_foeppl_von_karman.Po
 	-rm -f ./$(DEPDIR)/rectangular_plate_foeppl_von_karman.Po
@@ -856,7 +874,8 @@ install-ps-am:
 installcheck-am:
 
 maintainer-clean: maintainer-clean-am
-		-rm -f ./$(DEPDIR)/clamped_square_inflation.Po
+		-rm -f ./$(DEPDIR)/circular_disc_fvk.Po
+	-rm -f ./$(DEPDIR)/clamped_square_inflation.Po
 	-rm -f ./$(DEPDIR)/euler_column_buckling_foeppl_von_karman.Po
 	-rm -f ./$(DEPDIR)/infinite_strip_foeppl_von_karman.Po
 	-rm -f ./$(DEPDIR)/rectangular_plate_foeppl_von_karman.Po

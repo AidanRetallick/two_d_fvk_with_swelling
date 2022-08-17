@@ -4,7 +4,8 @@ noinst_PROGRAMS = square_free_swelling      \
                   clamped_square_inflation  \
                   rectangular_plate_fvk     \
                   infinite_strip_fvk        \
-                  euler_column_buckling_fvk
+                  euler_column_buckling_fvk \
+                  circular_disc_fvk
 include $(top_srcdir)/config/makefile_templates/demo_drivers
 #---------------------------------------------------------------------------
 
@@ -24,6 +25,8 @@ infinite_strip_fvk_SOURCES = \
 euler_column_buckling_fvk_SOURCES = \
  euler_column_buckling_foeppl_von_karman.cc
 
+circular_disc_fvk_SOURCES = \
+ circular_disc_fvk.cc
 #---------------------------------------------------------------------------
 
 square_free_swelling_LDADD = -L@libdir@ -lC1_foeppl_von_karman \
@@ -35,6 +38,8 @@ rectangular_plate_fvk_LDADD = -L@libdir@ -lC1_foeppl_von_karman \
 infinite_strip_fvk_LDADD = -L@libdir@ -lC1_foeppl_von_karman \
  -lC1_basis -lgeneric $(EXTERNAL_LIBS) $(FLIBS)
 euler_column_buckling_fvk_LDADD = -L@libdir@ -lC1_foeppl_von_karman \
+ -lC1_basis -lgeneric $(EXTERNAL_LIBS) $(FLIBS)
+circular_disc_fvk_LDADD = -L@libdir@ -lC1_foeppl_von_karman \
  -lC1_basis -lgeneric $(EXTERNAL_LIBS) $(FLIBS)
 
 # Local sources that Jack's own code depends on: This code also uses
@@ -58,5 +63,5 @@ euler_column_buckling_fvk_LDADD = -L@libdir@ -lC1_foeppl_von_karman \
 # Automake will replace the variable @includedir@ with the actual
 # include directory.
 
-AM_CPPFLAGS += -I@includedir@ -Wall -ggdb3 -g -DRANGE_CHECKING -DPARANOIA -O3
+AM_CPPFLAGS += -I@includedir@ -Wall -ggdb3 -g -O3
 #EXTRA_DIST = Circle1.1.ele Circle1.1.node Circle1.1.poly
