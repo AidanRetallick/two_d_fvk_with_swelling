@@ -1,5 +1,7 @@
 #! /bin/bash
 
+NP=3
+
 make rectangular_plate_fvk
 
 # Stuff to move
@@ -8,7 +10,7 @@ important_files="rectangular_plate_foeppl_von_karman.cc
                  rectangular_run.bash   "
 
 # Setup directories YOU MUST PICK A NAME FOR YOUR OURPUT DIRECTORY.
-main_dir=NEW_test_rectangular_p500
+main_dir=NEW_TEST_LU_rectangular_np_${NP}
 if [ -e $main_dir ]; then
     echo " "
     echo "WARNING: Directory " $main_dir "already exists!"
@@ -39,7 +41,7 @@ do
 	# Oomph-lib time!
 	#-------------------------------------------------------------
 	echo "Doing "$reslt_dir
-	./rectangular_plate_fvk \
+	mpirun -np $NP ./rectangular_plate_fvk \
 	  --dir $reslt_dir  \
 	  --mu  $MU         \
           2>&1 | tee $reslt_dir/OUTPUT

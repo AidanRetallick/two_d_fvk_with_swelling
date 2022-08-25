@@ -42,6 +42,23 @@ using namespace oomph;
 using MathematicalConstants::Pi;
 
 
+template<class ELEMENT>
+class MyMesh : public virtual TriangleMesh<ELEMENT>
+{
+public:
+ MyMesh<ELEMENT>(TriangleMeshParameters& triangle_mesh_parameters,
+		 TimeStepper *time_stepper_pt=&Mesh::Default_TimeStepper)
+  : TriangleMesh<ELEMENT>(triangle_mesh_parameters, time_stepper_pt)
+ {}
+
+ void update_polyline_representation_from_restart()
+ {
+  oomph_info << "Called MyMesh::update_polyline_representation_from_restart()"
+	     << std::endl
+	     << "           NOT DOING ANYTHING IN THIS FUNCTION" << std::endl;
+ }
+};
+ 
 namespace Params
 {
  // Plate parameters
@@ -89,7 +106,7 @@ namespace Params
  {
   // Almost uniform swelling with clamped boundaries
   swelling = c_swell_data_pt->value(0); // * (1 - pow(x[0]/L1,10) - pow(x[1]/L2,10)
-		     // + pow( (x[0]*x[1])/(L1*L2) , 10));
+  // + pow( (x[0]*x[1])/(L1*L2) , 10));
  }
 
  // Temperature wrapper so we can output the temperature function
@@ -105,15 +122,6 @@ namespace Params
   // No in plane force
   grad[0]=0.0;
   grad[1]=0.0;
- }
-
- // This metric will flag up any non--axisymmetric parts
- void axiasymmetry_metric(const Vector<double>& x, const
-			  Vector<double>& u, const Vector<double>& u_exact, double& error, double& norm)
- {
-  // We use the theta derivative of the out of plane deflection
-  error = pow((-x[1]*u[1] + x[0]*u[2])/sqrt(x[0]*x[0]+x[1]*x[1]),2);
-  norm  = pow(( x[0]*u[1] + x[1]*u[2])/sqrt(x[0]*x[0]+x[1]*x[1]),2);
  }
 
  // Get the exact solution
@@ -171,9 +179,9 @@ public:
 
  /// Return the number of newton iterations in the last solve attempt
  unsigned nnewton_iter_taken()
-  {
-   return Nnewton_iter_taken;
-  }
+ {
+  return Nnewton_iter_taken;
+ }
  /// Temporal error norm function.
  double global_temporal_error_norm()
  {
@@ -220,13 +228,39 @@ public:
   // Print some gubbins about parameters
   oomph_info << "-------------------------------------------------------" << std::endl;
   oomph_info << "Solving for p = " << Params::p_mag
-	     << "  (" << Params::p_mag*Params::P_dim << "Pa)" << std::endl
-	     << "      c_swell = " << Params::c_swell_data_pt->value(0) << std::endl
-	     << "     Doc_info = " << Doc_steady_info.number()
+	     << "  (" << Params::p_mag*Params::P_dim << "Pa)" << std::endl;
+  oomph_info << "      c_swell = " << Params::c_swell_data_pt->value(0) << std::endl;
+  oomph_info << "     Doc_info = " << Doc_steady_info.number()
 	     << ", " << Doc_unsteady_info.number() << std::endl;
   oomph_info << "-------------------------------------------------------" << std::endl;
  }
 
+ /// Remove surface mesh before reading
+ void actions_before_read_unstructured_meshes()
+ {
+  // How many surface elements are in the surface mesh
+  unsigned n_element = Surface_mesh_pt->nelement();
+
+  // Loop over the surface elements
+  for(unsigned e=0;e<n_element;e++)
+   {
+    // Kill surface element
+    delete Surface_mesh_pt->element_pt(e);
+   }
+
+  Surface_mesh_pt->flush_element_and_node_storage();
+
+  rebuild_global_mesh();
+ }
+ 
+ /// Add surface mesh back after reading
+ void actions_after_read_unstructured_meshes()
+ {
+  rebuild_global_mesh();
+  apply_boundary_conditions();
+  complete_problem_setup();
+ }
+ 
  /// Adaptively try to swell the membrane until it becomes unfeasible.
  void adaptive_swell_solve(double c_inc);
 
@@ -240,12 +274,75 @@ public:
  /// Doc the solution
  void doc_solution(const bool steady, const std::string& comment="");
 
+ /// Dump problem to disk to allow for restart.
+ void dump_it(ofstream& dump_file)
+ {
+  dump_file << Doc_steady_info.number() << " # steady step number" << std::endl
+	    << Doc_unsteady_info.number() << " # unsteady step number" << std::endl
+	    << Params::p_mag << " # pressure" << std::endl
+	    << Params::c_swell_data_pt->value(0) << " # swelling" << std::endl
+	    << Next_dt << " # suggested next timestep" << std::endl;
+  
+  // Call generic dump()
+  Problem::dump(dump_file); 
+ }
+ 
+ /// Read problem for restart from specified restart file.
+ void restart(ifstream& restart_file)
+ {
+  string input_string;
+  
+  // Read line up to termination sign
+  getline(restart_file,input_string,'#');
+  // Ignore rest of line
+  restart_file.ignore(80,'\n');
+  // Read in steady step number
+  Doc_steady_info.number()=unsigned(atof(input_string.c_str()));
+  Doc_steady_info.number()++;
+  
+  getline(restart_file,input_string,'#');
+  // Ignore rest of line
+  restart_file.ignore(80,'\n');
+  // Read in unsteady step number
+  Doc_unsteady_info.number()=unsigned(atof(input_string.c_str()));
+  Doc_unsteady_info.number()++;
+  
+  getline(restart_file,input_string,'#');
+  // Ignore rest of line
+  restart_file.ignore(80,'\n');
+  // Read in pressure value
+  Params::p_mag=double(atof(input_string.c_str()));
+
+  getline(restart_file,input_string,'#');
+  // Ignore rest of line
+  restart_file.ignore(80,'\n');
+  // Read in steady step number
+  Params::c_swell=double(atof(input_string.c_str()));
+  
+  // Read line up to termination sign
+  getline(restart_file,input_string,'#');
+  // Ignore rest of line
+  restart_file.ignore(80,'\n'); 
+  // Read suggested next timestep
+  Next_dt=double(atof(input_string.c_str()));
+ 
+  // Refine the mesh and read in the generic problem data
+  Problem::read(restart_file);
+ 
+ } // end of restart
+  
  /// \short Overloaded version of the problem's access function to
  /// the mesh. Recasts the pointer to the base Mesh object to
  /// the actual mesh type.
- TriangleMesh<ELEMENT>* mesh_pt()
+ MyMesh<ELEMENT>* mesh_pt()
  {
   return Bulk_mesh_pt;
+ }
+
+ /// Access function for Next_dt
+ double next_dt()
+ {
+  return Next_dt;
  }
 
  /// Doc info object for labeling all output
@@ -294,10 +391,14 @@ private:
  void delete_traction_elements(Mesh* const &surface_mesh_pt);
 
  /// Pointer to "bulk" mesh
- TriangleMesh<ELEMENT>* Bulk_mesh_pt;
+ MyMesh<ELEMENT>* Bulk_mesh_pt;
 
  /// Pointer to "surface" mesh
  Mesh* Surface_mesh_pt;
+ 
+ /// Suggestion for next timestep (stored to allow it to be written
+ /// to (or read from) restart file)
+ double Next_dt=0.1;
 
 }; // end_of_problem_class
 
@@ -340,7 +441,20 @@ UnstructuredFvKProblem<ELEMENT>::UnstructuredFvKProblem()
  Trace_file_nondim.open(filename);
  strcpy(filename, (Params::output_dir + "/trace_dim.dat").c_str());
  Trace_file_dim.open(filename);
+ 
+#ifdef OOMPH_HAS_MUMPS
+ // Let everyone know we are going to use MUMPS
+ oomph_info << std::endl << "Using MUMPS solver" << std::endl << std::endl;
+ 
+ // Change solver
+ linear_solver_pt()=new MumpsSolver;
 
+ // Shut up
+ dynamic_cast<MumpsSolver*>(linear_solver_pt())->
+  enable_suppress_warning_about_MPI_COMM_WORLD();
+
+#endif
+ 
  oomph_info << "Number of equations: "
 	    << assign_eqn_numbers() << '\n';
 
@@ -418,7 +532,7 @@ void UnstructuredFvKProblem<ELEMENT>::build_mesh()
  Triangle_mesh_parameters.element_area()=Element_area;
  
  // Build an assign bulk mesh
- Bulk_mesh_pt=new TriangleMesh<ELEMENT>(Triangle_mesh_parameters, time_stepper_pt());
+ Bulk_mesh_pt=new MyMesh<ELEMENT>(Triangle_mesh_parameters, time_stepper_pt());
  
  // Create "surface mesh" that will contain only the prescribed-traction
  // elements. The constructor creates the mesh without adding any nodes
@@ -448,6 +562,7 @@ void UnstructuredFvKProblem<ELEMENT>::complete_problem_setup()
 
  // And pin the pressure as it is our control.
  Params::c_swell_data_pt->pin(0);
+ Params::c_swell_data_pt->set_value(0,Params::c_swell);
  
  // Complete the build of all elements so they are fully functional
  unsigned n_element = Bulk_mesh_pt->nelement();
@@ -461,11 +576,26 @@ void UnstructuredFvKProblem<ELEMENT>::complete_problem_setup()
    el_pt->swelling_fct_pt() = &Params::get_swelling;
    el_pt->in_plane_forcing_fct_pt() = &Params::get_in_plane_force;
    // There is no error metric in this case
-   el_pt->error_metric_fct_pt() = &Params::axiasymmetry_metric;
    el_pt->nu_pt() = &Params::nu;
    el_pt->mu_pt() = &Params::mu;
    el_pt->eta_pt() = &Params::eta;
   }
+
+ // Do we want to pin in-plane displacement?
+ if(CommandLineArgs::command_line_flag_has_been_set("--pininplane"))
+  {
+   cout << "gonna pin em" << endl;
+   // Pin the in-plane displacements
+   unsigned nnode = mesh_pt()->nnode();
+   for(unsigned inode=0; inode<nnode; inode++)
+    {
+     mesh_pt()->node_pt(inode)->pin(0);
+     mesh_pt()->node_pt(inode)->pin(1);
+    }
+   cout << "successfully pinned" << endl;
+   assign_eqn_numbers();
+  }
+ 
  // Set the boundary conditions
  apply_boundary_conditions();
 }
@@ -576,7 +706,6 @@ void UnstructuredFvKProblem<ELEMENT>::adaptive_swell_solve(double c_inc)
     {
      cout << endl << endl
 	  << "Trying to 'do' with c_inc = " << c_inc << endl;
-
        
      // Reset the initial values for this attempt at the step
      *(Params::c_swell_data_pt->value_pt(0)) = old_c;
@@ -586,9 +715,9 @@ void UnstructuredFvKProblem<ELEMENT>::adaptive_swell_solve(double c_inc)
      if (c_inc < c_inc_min)
       {
        oomph_info << std::endl << std::endl
-	    << "This is just getting silly... c_inc is " << c_inc
-	    << "! Which is smaller than " << c_inc_min
-	    << std::endl << "It's time to give up..." << std::endl << std::endl;
+		  << "This is just getting silly... c_inc is " << c_inc
+		  << "! Which is smaller than " << c_inc_min
+		  << std::endl << "It's time to give up..." << std::endl << std::endl;
        getting_silly=true;
        break;
       }
@@ -694,25 +823,25 @@ void UnstructuredFvKProblem<ELEMENT>::arclength_swell_solve(double c_inc)
 
  // Take ~so-many~ steps
  for(unsigned i=0;i<200;i++)
-   {
-    // Solve
-    ds = arc_length_step_solve(Params::c_swell_data_pt, 0, ds);
+  {
+   // Solve
+   ds = arc_length_step_solve(Params::c_swell_data_pt, 0, ds);
 
-    oomph_info << std::endl
-	       << "An arclength step has been successfully completed :)"
-	       << std::endl;
+   oomph_info << std::endl
+	      << "An arclength step has been successfully completed :)"
+	      << std::endl;
 
-    // Now document the result!
-    doc_solution();
+   // Now document the result!
+   doc_solution();
     
-    if(First_jacobian_sign_change)
-     {
-      oomph_info << std::endl << std::endl
-		 << "We have passed a bifurcation!"
-		 << std::endl << std::endl;
-      First_jacobian_sign_change=false;
-     }
-   }
+   if(First_jacobian_sign_change)
+    {
+     oomph_info << std::endl << std::endl
+		<< "We have passed a bifurcation!"
+		<< std::endl << std::endl;
+     First_jacobian_sign_change=false;
+    }
+  }
 } // End of arclength_swell_solve()
 
 template<class ELEMENT>
@@ -721,6 +850,7 @@ void UnstructuredFvKProblem<ELEMENT>::damped_solve(double dt,
 						   bool doc_unsteady)
 {
  bool STEADY = false;
+ double R = Params::relevant_energy_factor;
  while(!STEADY)
   {
    oomph_info << "NEW DAMPED PSEUDO-TIME STEP" << std::endl;
@@ -731,6 +861,10 @@ void UnstructuredFvKProblem<ELEMENT>::damped_solve(double dt,
    if(doc_unsteady)
     {
      doc_solution(false);
+    }
+   else
+    {
+     Doc_unsteady_info.number()++;
     }
    
    // Now compare energies to check whether we are almost steady or not.
@@ -746,7 +880,6 @@ void UnstructuredFvKProblem<ELEMENT>::damped_solve(double dt,
     }
    oomph_info << "Elastic energy: " << elastic_energy << std::endl
 	      << "Kinetic energy: " << kinetic_energy << std::endl;
-   double R = Params::relevant_energy_factor;
    if(R*abs(kinetic_energy) < abs(elastic_energy))
     {
      oomph_info << "ALMOST STEADY SO ATTEMPT A STEADY SOLVE" << std::endl;
@@ -764,15 +897,15 @@ void UnstructuredFvKProblem<ELEMENT>::damped_solve(double dt,
       }
      catch(OomphLibError& error)
       {
-       oomph_info << "NOT STEADY ENOUGH. REDUCING THE KINETIC ENERGY PROPORTION FROM "
+       oomph_info << "NOT STEADY ENOUGH. INCREASING THE KINETIC ENERGY PROPORTION FROM "
 		  << R << " TO " << 10.0*R << " FROM NOW ON" << std::endl;
-       R*=0.1;
+       R*=10.0;
        restore_dof_values();
        for (unsigned i=0; i<ntime_stepper(); i++)
 	{
 	 time_stepper_pt(i)->undo_make_steady();
 	}
-       assign_initial_values_impulsive();
+       assign_initial_values_impulsive(dt);
        error.disable_error_message();
       }
     }
@@ -788,87 +921,100 @@ template<class ELEMENT>
 void UnstructuredFvKProblem<ELEMENT>::doc_solution(bool steady,
 						   const std::string& comment)
 {
- ofstream some_file;
- char filename[100];
- string tempstring;
-  
- // Number of plot points
- unsigned npts = 2;
-
- if(steady)
+ if(MPI_Helpers::communicator_pt()->my_rank()==0)
   {
-   tempstring = Params::output_dir + "/coarse_soln_"
-    + std::to_string(Doc_steady_info.number()) + ".dat";
-  }
- else
-  {
-   tempstring = Params::output_dir + "/coarse_soln_"
-    + std::to_string(Doc_steady_info.number()) + "_"
-    + std::to_string(Doc_unsteady_info.number()) + ".dat";
-  }
- strcpy(filename, tempstring.c_str());
- some_file.open(filename);
- Bulk_mesh_pt->output(some_file,npts);
- some_file << "TEXT X = 22, Y = 92, CS=FRAME T = \""
-	   << comment << "\"\n";
- some_file.close();
+   ofstream some_file;
+   char filename[100];
 
- // Number of plot points
- npts = 10;
-
- if(steady)
-  {
-   tempstring = Params::output_dir + "/soln_"
-    + std::to_string(Doc_steady_info.number()) + ".dat";
-  }
- else
-  {
-   tempstring = Params::output_dir + "/soln_"
-    + std::to_string(Doc_steady_info.number()) + "_"
-    + std::to_string(Doc_unsteady_info.number()) + ".dat";
-  }
- strcpy(filename, tempstring.c_str());
- some_file.open(filename);
- Bulk_mesh_pt->output(some_file,npts);
- some_file << "TEXT X = 22, Y = 92, CS=FRAME T = \""
-	   << comment << "\"\n";
- some_file.close();
-
-
- // Write the pressure, degree of swelling and
- // deflection to the trace file
- //-----------------------------------------------------
- // Get the centre deflection first
- Vector<double> origin(2,0.0), s(2,0.0);
- GeomObject* centre_element_pt;
- Vector<double> w_centre(1,0.0);
-  
- unsigned n_element=Bulk_mesh_pt->nelement();
- for(unsigned i=0; i<n_element; i++)
-  {
-   dynamic_cast<ELEMENT*>(Bulk_mesh_pt->element_pt(i))
-    ->locate_zeta(origin, centre_element_pt, s);
-   if(centre_element_pt!=NULL)
+   // Dump to a restart file if we are steady
+   if(steady)
     {
-     w_centre = dynamic_cast<ELEMENT*>(centre_element_pt)
-      ->interpolated_u_foeppl_von_karman(s);
-     break;
+     // Write restart file
+     sprintf(filename,"%s/restart%i.dat",
+	     Params::output_dir.c_str(),
+	     Doc_steady_info.number());
+     some_file.open(filename);
+     dump_it(some_file);
+     some_file.close();
     }
-  }
  
- Trace_file_nondim << Doc_steady_info.number()          << " "
-		   << Doc_unsteady_info.number()        << " "
-		   << time()                            << " "
-		   << Params::p_mag                     << " "
-		   << Params::c_swell_data_pt->value(0) << " "
-		   << w_centre[0]                       << endl;
- Trace_file_dim    << Doc_steady_info.number()          << " "
-		   << Doc_unsteady_info.number()        << " "
-		   << time()                            << " "
-		   << Params::p_mag*Params::P_dim       << " "
-		   << Params::c_swell_data_pt->value(0) << " "
-		   << w_centre[0]*Params::L_dim         << endl;
+   // Number of plot points for coarse output
+   unsigned npts = 2;
+   if(steady)
+    {
+     sprintf(filename, "%s/coarse_soln_%i.dat",
+	     Params::output_dir.c_str(),
+	     Doc_steady_info.number());
+    }
+   else
+    {
+     sprintf(filename, "%s/coarse_soln_%i_%i.dat",
+	     Params::output_dir.c_str(),
+	     Doc_steady_info.number(),
+	     Doc_unsteady_info.number());
+    }
+   some_file.open(filename);
+   Bulk_mesh_pt->output(some_file,npts);
+   some_file << "TEXT X = 22, Y = 92, CS=FRAME T = \""
+	     << comment << "\"\n";
+   some_file.close();
 
+   // Number of plot points for fine outpout
+   npts = 10;
+   if(steady)
+    {
+     sprintf(filename, "%s/soln_%i.dat",
+	     Params::output_dir.c_str(),
+	     Doc_steady_info.number());
+    }
+   else
+    {
+     sprintf(filename, "%s/soln_%i_%i.dat",
+	     Params::output_dir.c_str(),
+	     Doc_steady_info.number(),
+	     Doc_unsteady_info.number());
+    }
+   some_file.open(filename);
+   Bulk_mesh_pt->output(some_file,npts);
+   some_file << "TEXT X = 22, Y = 92, CS=FRAME T = \""
+	     << comment << "\"\n";
+   some_file.close();
+
+   // Write the pressure, degree of swelling and
+   // deflection to the trace file
+   //-----------------------------------------------------
+   // Get the centre deflection first
+   Vector<double> origin(2,0.0), s(2,0.0);
+   GeomObject* centre_element_pt;
+   Vector<double> w_centre(1,0.0);
+  
+   unsigned n_element=Bulk_mesh_pt->nelement();
+   for(unsigned i=0; i<n_element; i++)
+    {
+     dynamic_cast<ELEMENT*>(Bulk_mesh_pt->element_pt(i))
+      ->locate_zeta(origin, centre_element_pt, s);
+     if(centre_element_pt!=NULL)
+      {
+       w_centre = dynamic_cast<ELEMENT*>(centre_element_pt)
+	->interpolated_u_foeppl_von_karman(s);
+       break;
+      }
+    }
+ 
+   Trace_file_nondim << Doc_steady_info.number()          << " "
+		     << Doc_unsteady_info.number()        << " "
+		     << time()                            << " "
+		     << Params::p_mag                     << " "
+		     << Params::c_swell_data_pt->value(0) << " "
+		     << w_centre[0]                       << endl;
+   Trace_file_dim    << Doc_steady_info.number()          << " "
+		     << Doc_unsteady_info.number()        << " "
+		     << time()                            << " "
+		     << Params::p_mag*Params::P_dim       << " "
+		     << Params::c_swell_data_pt->value(0) << " "
+		     << w_centre[0]*Params::L_dim         << endl;
+
+  }
  // Increment the doc_info numbers
  if(steady)
   {
@@ -879,8 +1025,9 @@ void UnstructuredFvKProblem<ELEMENT>::doc_solution(bool steady,
   {
    Doc_unsteady_info.number()++;
   }
- 
 } // end of doc
+
+
 
 //============start_of_delete_flux_elements==============================
 /// Delete Poisson Flux Elements and wipe the surface mesh
@@ -904,11 +1051,16 @@ void UnstructuredFvKProblem<ELEMENT>
 
 } // end of delete_flux_elements
 
+
+
 //=======start_of_main========================================
 ///Driver code for demo of inline triangle mesh generation
 //============================================================
 int main(int argc, char **argv)
 {
+ // Initialise oomph-lib's MPI       
+ MPI_Helpers::init(argc,argv);     
+ 
  feenableexcept(FE_INVALID | FE_DIVBYZERO | FE_OVERFLOW);
  // Store command line arguments
  CommandLineArgs::setup(argc,argv);
@@ -920,6 +1072,11 @@ int main(int argc, char **argv)
  CommandLineArgs::specify_command_line_flag("--dir",
 					    &Params::output_dir);
 
+ string restart_file_name;
+ // Are we restarting from a dumped file?
+ CommandLineArgs::specify_command_line_flag("--restart",
+					    &restart_file_name);
+ 
  // Poisson Ratio
  CommandLineArgs::specify_command_line_flag("--nu",
 					    &Params::nu);
@@ -941,7 +1098,7 @@ int main(int argc, char **argv)
 					    &Params::c_swell);
 
  // Element Area (no larger element than)
- Params::element_area=0.009;
+ Params::element_area=0.001;
  CommandLineArgs::specify_command_line_flag("--element_area",
 					    &Params::element_area);
  
@@ -954,8 +1111,8 @@ int main(int argc, char **argv)
 
  // How many nodes do we want to manually place along the boundaries
  // (roughly length*width/thickness)
- Params::n_long_edge_nodes  = ceil(0.04*Params::L1/Params::thickness) + 2;
- Params::n_short_edge_nodes = ceil(0.04*Params::L2/Params::thickness) + 2;
+ Params::n_long_edge_nodes  = ceil(0.00*Params::L1/Params::thickness) + 2;
+ Params::n_short_edge_nodes = ceil(0.00*Params::L2/Params::thickness) + 2;
  
  // Doc what has actually been specified on the command line
  CommandLineArgs::doc_specified_flags();
@@ -964,28 +1121,22 @@ int main(int argc, char **argv)
  UnstructuredFvKProblem<ThermoFoepplVonKarmanC1CurvedBellElement<4>>
   problem;
 
- if(CommandLineArgs::command_line_flag_has_been_set("--pininplane"))
-  {
-   cout << "gonna pin em" << endl;
-   // Pin the in-plane displacements
-   unsigned nnode = problem.mesh_pt()->nnode();
-   for(unsigned inode=0; inode<nnode; inode++)
-    {
-     problem.mesh_pt()->node_pt(inode)->pin(0);
-     problem.mesh_pt()->node_pt(inode)->pin(1);
-    }
-   cout << "successfully pinned" << endl;
-   problem.assign_eqn_numbers();
-  }
-
  // Set up some problem paramters
  problem.newton_solver_tolerance()=1e-10;
  problem.max_residuals()=1e4;
  problem.max_newton_iterations()=10;
 
- double dt = 1.0;
- double epsilon = 1.0e-3;
+ if(CommandLineArgs::command_line_flag_has_been_set("--restart"))
+  {
+   oomph_info << "We are restarting from: " << restart_file_name << std::endl;
+   ifstream restart_stream;
+   restart_stream.open(restart_file_name);
+   problem.restart(restart_stream);
+   restart_stream.close();
+  }
 
+ double dt = problem.next_dt();
+ double epsilon = 1.0e-3;
  problem.assign_initial_values_impulsive();
  problem.initialise_dt(dt);
  
@@ -997,32 +1148,27 @@ int main(int argc, char **argv)
  problem.steady_newton_solve(); // SOLVE
  problem.doc_solution(true); // AND DOCUMENT
 
- // INFLATION
+ // // INFLATION
  Params::p_mag+=p_inc;   // 10
  
  // Pre-inflate the membrane
  oomph_info << "INFLATION STAGE" << std::endl;
- problem.damped_solve(dt, epsilon, true);
-
+ problem.damped_solve(dt, epsilon, false);
+ 
  // Swell the membrane
  oomph_info << "SWELLING STAGE" << std::endl;
- Params::mu*=1.0;
- for(unsigned i=0; i<200; i++)
+ double c_swell_max=0.30;;
+ while(Params::c_swell<c_swell_max)
   {
    Params::c_swell += c_inc;
    Params::c_swell_data_pt->set_value(0, Params::c_swell);
    oomph_info << "c_swell = " << Params::c_swell << std::endl;
-   problem.damped_solve(dt, epsilon, true);
+   problem.damped_solve(dt, epsilon, false);
   } // End of swelling loop
- 
-
-
-// SWELLING LOOP
- //problem.arclength_swell_solve(c_inc);
-
 
  // Print success
  oomph_info<<"Exiting Normally\n";
 
-
+ // Shut down oomph-lib's MPI
+ MPI_Helpers::finalize();
 } //End of main
