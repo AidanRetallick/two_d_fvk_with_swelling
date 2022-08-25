@@ -2,5 +2,8 @@
 !*.*                                                                             
 .*                                                                               
 *.[o,a]                                                                          
-RESLT/*                                                                          
-RESLT_bell/* 
+NEW*/
+RESLT/
+*.bash
+!*template*.bash
+*.json
