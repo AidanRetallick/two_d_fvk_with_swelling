@@ -68,7 +68,7 @@ namespace Params
  double nu = 0.495;
  double mu = 1000.0;
  double eta = 12*(1-nu*nu) / (thickness*thickness);
- double relevant_energy_factor = 20.0;
+ double relevant_energy_factor = 100.0;
  // Control parameters
  double p_mag = 0.0;
  double c_swell = 0.0;
@@ -305,7 +305,7 @@ public:
   restart_file.ignore(80,'\n');
   // Read in unsteady step number
   Doc_unsteady_info.number()=unsigned(atof(input_string.c_str()));
-  Doc_unsteady_info.number()++;
+  Doc_unsteady_info.number()=0; //for now [witnessme]
   
   getline(restart_file,input_string,'#');
   // Ignore rest of line
@@ -556,6 +556,9 @@ void UnstructuredFvKProblem<ELEMENT>::build_mesh()
 template<class ELEMENT>
 void UnstructuredFvKProblem<ELEMENT>::complete_problem_setup()
 {
+ DTSF_max_increase=3.0/2.0;
+ DTSF_min_decrease=2.0/3.0;
+ 
  // Create a new Data object whose one-and-only value contains the
  // (in principle) adjustible load
  Params::c_swell_data_pt = new Data(1);
@@ -897,16 +900,26 @@ void UnstructuredFvKProblem<ELEMENT>::damped_solve(double dt,
       }
      catch(OomphLibError& error)
       {
-       oomph_info << "NOT STEADY ENOUGH. INCREASING THE KINETIC ENERGY PROPORTION FROM "
-		  << R << " TO " << 10.0*R << " FROM NOW ON" << std::endl;
-       R*=10.0;
-       restore_dof_values();
-       for (unsigned i=0; i<ntime_stepper(); i++)
+       if(R>1.0e20)
 	{
-	 time_stepper_pt(i)->undo_make_steady();
+	 oomph_info << "WARNING";
+	 oomph_info << "R is now " << R << " which is smaller than it has any";
+	 oomph_info << "right to be. Giving up on damped solves..." << std::endl;
+	 throw error;
 	}
-       assign_initial_values_impulsive(dt);
-       error.disable_error_message();
+       else
+	{
+	 oomph_info << "NOT STEADY ENOUGH. INCREASING THE KINETIC ENERGY PROPORTION FROM "
+		    << R << " TO " << 100.0*R << " FROM NOW ON" << std::endl;
+	 R*=100.0;
+	 restore_dof_values();
+	 for (unsigned i=0; i<ntime_stepper(); i++)
+	 {
+	  time_stepper_pt(i)->undo_make_steady();
+	 }
+	 assign_initial_values_impulsive(dt);
+	 error.disable_error_message();
+	}
       }
     }
   } // End of while(UNSTEADY)
@@ -931,36 +944,37 @@ void UnstructuredFvKProblem<ELEMENT>::doc_solution(bool steady,
     {
      // Write restart file
      sprintf(filename,"%s/restart%i.dat",
-	     Params::output_dir.c_str(),
-	     Doc_steady_info.number());
+   	     Params::output_dir.c_str(),
+   	     Doc_steady_info.number());
      some_file.open(filename);
      dump_it(some_file);
      some_file.close();
     }
  
-   // Number of plot points for coarse output
-   unsigned npts = 2;
-   if(steady)
-    {
-     sprintf(filename, "%s/coarse_soln_%i.dat",
-	     Params::output_dir.c_str(),
-	     Doc_steady_info.number());
-    }
-   else
-    {
-     sprintf(filename, "%s/coarse_soln_%i_%i.dat",
-	     Params::output_dir.c_str(),
-	     Doc_steady_info.number(),
-	     Doc_unsteady_info.number());
-    }
-   some_file.open(filename);
-   Bulk_mesh_pt->output(some_file,npts);
-   some_file << "TEXT X = 22, Y = 92, CS=FRAME T = \""
-	     << comment << "\"\n";
-   some_file.close();
+   unsigned npts;
+   // // Number of plot points for coarse output
+   // npts = 2;
+   // if(steady)
+   //  {
+   //   sprintf(filename, "%s/coarse_soln_%i.dat",
+   // 	     Params::output_dir.c_str(),
+   // 	     Doc_steady_info.number());
+   //  }
+   // else
+   //  {
+   //   sprintf(filename, "%s/coarse_soln_%i_%i.dat",
+   // 	     Params::output_dir.c_str(),
+   // 	     Doc_steady_info.number(),
+   // 	     Doc_unsteady_info.number());
+   //  }
+   // some_file.open(filename);
+   // Bulk_mesh_pt->output(some_file,npts);
+   // some_file << "TEXT X = 22, Y = 92, CS=FRAME T = \""
+   // 	     << comment << "\"\n";
+   // some_file.close();
 
    // Number of plot points for fine outpout
-   npts = 10;
+   npts = 5;
    if(steady)
     {
      sprintf(filename, "%s/soln_%i.dat",
@@ -1090,8 +1104,9 @@ int main(int argc, char **argv)
 					    &Params::eta);
 
  // Applied Pressure
+ double p_inc = 24000.0;
  CommandLineArgs::specify_command_line_flag("--p",
-					    &Params::p_mag);
+					    &p_inc);
 
  // Temperature increase
  CommandLineArgs::specify_command_line_flag("--t",
@@ -1140,20 +1155,27 @@ int main(int argc, char **argv)
  problem.assign_initial_values_impulsive();
  problem.initialise_dt(dt);
  
- double p_inc = 24000.0;
  double c_inc = 0.002;
 
+ if(CommandLineArgs::command_line_flag_has_been_set("--restart"))
+  {
+   problem.Doc_steady_info.number()-=1;
+  }
+ 
  oomph_info << "DO AN INITIAL STATE SOLVE" << std::endl;
  // INITIAL SOLVE
  problem.steady_newton_solve(); // SOLVE
  problem.doc_solution(true); // AND DOCUMENT
 
- // // INFLATION
- Params::p_mag+=p_inc;   // 10
- 
- // Pre-inflate the membrane
- oomph_info << "INFLATION STAGE" << std::endl;
- problem.damped_solve(dt, epsilon, false);
+ if(!CommandLineArgs::command_line_flag_has_been_set("--restart"))
+  {
+   // INFLATION
+   Params::p_mag+=p_inc;
+  
+   // Pre-inflate the membrane
+   oomph_info << "INFLATION STAGE" << std::endl;
+   problem.damped_solve(dt, epsilon, false);
+  }
  
  // Swell the membrane
  oomph_info << "SWELLING STAGE" << std::endl;
@@ -1163,6 +1185,7 @@ int main(int argc, char **argv)
    Params::c_swell += c_inc;
    Params::c_swell_data_pt->set_value(0, Params::c_swell);
    oomph_info << "c_swell = " << Params::c_swell << std::endl;
+   // bool argument to specify whether we want to doc unsteady time steps.
    problem.damped_solve(dt, epsilon, false);
   } // End of swelling loop
 
