@@ -556,8 +556,8 @@ void UnstructuredFvKProblem<ELEMENT>::build_mesh()
 template<class ELEMENT>
 void UnstructuredFvKProblem<ELEMENT>::complete_problem_setup()
 {
- DTSF_max_increase=3.0/2.0;
- DTSF_min_decrease=2.0/3.0;
+ DTSF_max_increase=2.0;
+ DTSF_min_decrease=0.5;
  
  // Create a new Data object whose one-and-only value contains the
  // (in principle) adjustible load
@@ -1091,6 +1091,10 @@ int main(int argc, char **argv)
  CommandLineArgs::specify_command_line_flag("--restart",
 					    &restart_file_name);
  
+ // Channel length Ratio
+ CommandLineArgs::specify_command_line_flag("--L",
+					    &Params::L1);
+ 
  // Poisson Ratio
  CommandLineArgs::specify_command_line_flag("--nu",
 					    &Params::nu);
@@ -1137,7 +1141,7 @@ int main(int argc, char **argv)
   problem;
 
  // Set up some problem paramters
- problem.newton_solver_tolerance()=1e-10;
+ problem.newton_solver_tolerance()=1e-8;
  problem.max_residuals()=1e4;
  problem.max_newton_iterations()=10;
 
@@ -1169,17 +1173,20 @@ int main(int argc, char **argv)
 
  if(!CommandLineArgs::command_line_flag_has_been_set("--restart"))
   {
-   // INFLATION
-   Params::p_mag+=p_inc;
-  
-   // Pre-inflate the membrane
-   oomph_info << "INFLATION STAGE" << std::endl;
-   problem.damped_solve(dt, epsilon, false);
+   //   while(Params::p_mag<p_max)
+    {
+     // INFLATION
+     Params::p_mag+=p_inc;
+     
+     // Pre-inflate the membrane
+     oomph_info << "INFLATION STAGE" << std::endl;
+     problem.damped_solve(dt, epsilon, false);
+    }  
   }
  
  // Swell the membrane
  oomph_info << "SWELLING STAGE" << std::endl;
- double c_swell_max=0.30;;
+ double c_swell_max=0.30;
  while(Params::c_swell<c_swell_max)
   {
    Params::c_swell += c_inc;

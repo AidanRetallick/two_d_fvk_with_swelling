@@ -7,3 +7,5 @@ RESLT/
 *.bash
 !*template*.bash
 *.json
+*.in
+
