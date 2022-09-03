@@ -69,6 +69,7 @@ namespace Params
  double mu = 1000.0;
  double eta = 12*(1-nu*nu) / (thickness*thickness);
  double relevant_energy_factor = 100.0;
+
  // Control parameters
  double p_mag = 0.0;
  double c_swell = 0.0;
@@ -109,7 +110,7 @@ namespace Params
   // + pow( (x[0]*x[1])/(L1*L2) , 10));
  }
 
- // Temperature wrapper so we can output the temperature function
+ // Swelling wrapper so we can output the degree of swelling function
  void get_swelling(const Vector<double>& X, Vector<double>& swelling)
  {
   swelling.resize(1);
@@ -158,8 +159,8 @@ public:
  /// Destructor
  ~UnstructuredFvKProblem()
  {
-  Trace_file_nondim.close();
   Trace_file_dim.close();
+  Trace_file_nondim.close();
   delete (Surface_mesh_pt);
   delete (Bulk_mesh_pt);
   // Clean up memory
@@ -170,8 +171,6 @@ public:
   delete Boundary1_pt;
   delete Boundary2_pt;
   delete Boundary3_pt;
-  //  delete InnerBoudary0_pt;
-  //  delete InnerBoudary1_pt;
  };
 
  /// Setup and build the mesh
@@ -252,7 +251,7 @@ public:
 
   rebuild_global_mesh();
  }
- 
+
  /// Add surface mesh back after reading
  void actions_after_read_unstructured_meshes()
  {
@@ -260,12 +259,6 @@ public:
   apply_boundary_conditions();
   complete_problem_setup();
  }
- 
- /// Adaptively try to swell the membrane until it becomes unfeasible.
- void adaptive_swell_solve(double c_inc);
-
- /// Use oomph-lib's pseudo arclength continuation to try swell the membrane.
- void arclength_swell_solve(double c_inc);
 
  /// Attempt an ordinary steady solve, but failing that solve an unsteady damped
  /// version of the equations with a run of adaptive unsteady solves.
@@ -466,8 +459,6 @@ UnstructuredFvKProblem<ELEMENT>::UnstructuredFvKProblem()
  
 } // end Constructor
 
-
-
 /// Set up and build the mesh
 template<class ELEMENT>
 void UnstructuredFvKProblem<ELEMENT>::build_mesh()
@@ -603,8 +594,6 @@ void UnstructuredFvKProblem<ELEMENT>::complete_problem_setup()
  apply_boundary_conditions();
 }
 
-
-
 //==start_of_apply_bc=====================================================
 /// Helper function to apply boundary conditions
 //========================================================================
@@ -656,196 +645,6 @@ void UnstructuredFvKProblem<ELEMENT>::apply_boundary_conditions()
     }
   }
 } // end set bc
-
-
-
-
-//==start_of_adaptive_swell_solve=========================================
-/// Try to swell the membrane adaptively
-//========================================================================
-template<class ELEMENT>
-void UnstructuredFvKProblem<ELEMENT>::adaptive_swell_solve(double c_inc)
-{
-    
- // Max number of newton iterations before shrinking step size
- unsigned max_desired_iterations = 20;
-   
- // Min number of newton iterations before increasing step size
- unsigned min_desired_iterations = 5;
-
- // Step size relaxation multiplier
- double relaxation_const = 3.0/2.0;
-
- // Step size refinement multiplier
- double refinement_const = relaxation_const*relaxation_const;
-
- // Set absolute largest allowed value for dh
- double c_inc_max = 3.0*c_inc;
-   
- // Set absolute smallest allowed value for dh
- double c_inc_min = c_inc / 1000.0;
-
- // Are things getting silly?
- bool getting_silly = false;
-
- while(!getting_silly)
-  {
-   // Loop for trying to solve a single displcement step
-   
-   // Make a copy of the current displacement incase the step fails
-   double old_c = Params::c_swell_data_pt->value(0);
-      
-   // Make a copy of initial values incase the step fails
-   DoubleVector old_dofs;
-   get_dofs(old_dofs);
-   
-   // The number of newton iterations taken by the last solve
-   unsigned n_newton_iterations = 0;
-   
-   // Has this step failed to converge
-   bool step_rejected = false;
- 
-   do
-    {
-     cout << endl << endl
-	  << "Trying to 'do' with c_inc = " << c_inc << endl;
-       
-     // Reset the initial values for this attempt at the step
-     *(Params::c_swell_data_pt->value_pt(0)) = old_c;
-     set_dofs(old_dofs);
-
-     // Check we aren't swelling too slowly to be meaningful
-     if (c_inc < c_inc_min)
-      {
-       oomph_info << std::endl << std::endl
-		  << "This is just getting silly... c_inc is " << c_inc
-		  << "! Which is smaller than " << c_inc_min
-		  << std::endl << "It's time to give up..." << std::endl << std::endl;
-       getting_silly=true;
-       break;
-      }
-       
-     // Assume for now this step wont be rejected
-     step_rejected = false;
-
-     // Increment the pinned value of c_swell
-     *(Params::c_swell_data_pt->value_pt(0)) += c_inc;
-
-     // Time to solve.
-     // Actually do the newton solve stage
-     try
-      {
-       newton_solve();
-       n_newton_iterations = nnewton_iter_taken();
-      }
-   
-     // Catch any exceptions thrown in the Newton solver
-     catch (NewtonSolverError& error)
-      {
-       // Check whether it's the linear solver
-       if (error.linear_solver_error)
-	{
-	 std::ostringstream error_stream;
-	 error_stream << std::endl
-		      << "USER-DEFINED ERROR IN NEWTON SOLVER " << std::endl;
-	 oomph_info << "ERROR IN THE LINEAR SOLVER" << std::endl;
-	 throw OomphLibError(error_stream.str(),
-			     OOMPH_CURRENT_FUNCTION,
-			     OOMPH_EXCEPTION_LOCATION);
-	}
-       // Otherwise mark the step as having failed
-       else
-	{
-	 oomph_info << "STEP REJECTED --- TRYING AGAIN" << std::endl;
-	 step_rejected = true;
-	 // Let's take a smaller step
-	 c_inc *= refinement_const;
-	}
-      } // End of error catch
-    } while (step_rejected); // End of displacement increment
-
-   if(getting_silly)
-    {
-     oomph_info << "Stopping the adaptive swell solve now..."
-		<< std::endl << std::endl;
-     break;
-    }
-   
-   // Output solution
-   doc_solution();
-     
-   // Time to reconsider our increment size dh...
-   if (n_newton_iterations > max_desired_iterations)
-    {
-     c_inc *= refinement_const;
-    }
-   else if (n_newton_iterations < min_desired_iterations
-	    && c_inc* relaxation_const < c_inc_max)
-    {
-     c_inc *= relaxation_const;
-    }
-  }
-} // End of adaptive swell solve
-
-
-//==start of arclength_swell_solve=========================================
-/// Try to swell the membrane using pseudo-arclength continuation.
-//========================================================================
-template<class ELEMENT>
-void UnstructuredFvKProblem<ELEMENT>::arclength_swell_solve(double c_inc)
-{
- // Now we pin the pressure data
- Params::c_swell_data_pt->pin(0);
- 
- //Re-assign the equation numbers
- cout << std::endl;
- cout << "-----------------ARC-LENGTH CONTINUATION --------------" 
-      << std::endl;
- cout << "# of dofs " << assign_eqn_numbers() << std::endl;
- cout << "-------------------------------------------------------" 
-      << std::endl;
- cout << std::endl;
-
- 
- // Set the maximum number of Newton iterations
- Max_newton_iterations=7;
-
- // Set the minimum desired number of iterations before increasing arclength
- Desired_newton_iterations_ds=4;
-
- // Set the proportion of arclength??
- Desired_proportion_of_arc_length = 0.1;
-
- // Check for bifurcations using the sign of the determinant of the Jacobian
- Bifurcation_detection = true;
- Bisect_to_find_bifurcation =
-  CommandLineArgs::command_line_flag_has_been_set("--Find_membrane_collapse");
-
- // Set an initial value for the step size
- double ds = 0.01;
-
- // Take ~so-many~ steps
- for(unsigned i=0;i<200;i++)
-  {
-   // Solve
-   ds = arc_length_step_solve(Params::c_swell_data_pt, 0, ds);
-
-   oomph_info << std::endl
-	      << "An arclength step has been successfully completed :)"
-	      << std::endl;
-
-   // Now document the result!
-   doc_solution();
-    
-   if(First_jacobian_sign_change)
-    {
-     oomph_info << std::endl << std::endl
-		<< "We have passed a bifurcation!"
-		<< std::endl << std::endl;
-     First_jacobian_sign_change=false;
-    }
-  }
-} // End of arclength_swell_solve()
 
 template<class ELEMENT>
 void UnstructuredFvKProblem<ELEMENT>::damped_solve(double dt,
@@ -924,7 +723,6 @@ void UnstructuredFvKProblem<ELEMENT>::damped_solve(double dt,
     }
   } // End of while(UNSTEADY)
 }
-
 
 
 //==start_of_doc_solution=================================================
@@ -1040,8 +838,6 @@ void UnstructuredFvKProblem<ELEMENT>::doc_solution(bool steady,
    Doc_unsteady_info.number()++;
   }
 } // end of doc
-
-
 
 //============start_of_delete_flux_elements==============================
 /// Delete Poisson Flux Elements and wipe the surface mesh
