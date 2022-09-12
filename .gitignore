@@ -8,4 +8,5 @@ RESLT/
 !*template*.bash
 *.json
 *.in
-
+*.gz
+*.tar

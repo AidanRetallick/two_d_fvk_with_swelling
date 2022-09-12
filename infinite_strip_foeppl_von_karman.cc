@@ -109,7 +109,7 @@ namespace Params
 		     // + pow( (x[0]*x[1])/(L1*L2) , 10));
  }
 
- // Temperature wrapper so we can output the temperature function
+ // Swelling wrapper so we can output the degree of swelling function
  void get_swelling(const Vector<double>& X, Vector<double>& swelling)
  {
   swelling.resize(1);
@@ -124,7 +124,7 @@ namespace Params
   grad[1]=0.0;
  }
 
-
+ // Get the exact solution
  void get_null_fct(const Vector<double>& X, double& exact_w)
  {
   exact_w = 0.0;
@@ -674,7 +674,7 @@ void UnstructuredFvKProblem<ELEMENT>::damped_solve(double dt,
     }
    oomph_info << "Elastic energy: " << elastic_energy << std::endl
 	      << "Kinetic energy: " << kinetic_energy << std::endl;
-   if(R*abs(kinetic_energy) < abs(elastic_energy))
+   if(R*abs(kinetic_energy) < abs(elastic_energy)+1.0e-16)
     {
      oomph_info << "ALMOST STEADY SO ATTEMPT A STEADY SOLVE" << std::endl;
      store_current_dof_values();
@@ -686,7 +686,6 @@ void UnstructuredFvKProblem<ELEMENT>::damped_solve(double dt,
 	 doc_solution(false);
 	}
        time()=0.0;
-       doc_solution(true);
        STEADY=true;
       }
      catch(OomphLibError& error)
@@ -895,14 +894,14 @@ int main(int argc, char **argv)
  CommandLineArgs::specify_command_line_flag("--eta",
 					    &Params::eta);
 
- // Applied Pressure
+ // Pressure increment
  double p_inc = 24000.0;
  CommandLineArgs::specify_command_line_flag("--p",
 					    &p_inc);
-
- // Temperature increase
- CommandLineArgs::specify_command_line_flag("--t",
-					    &Params::c_swell);
+ // Swelling increment
+ double c_inc = 0.001;
+ CommandLineArgs::specify_command_line_flag("--c",
+					    &c_inc);
 
  // Element Area (no larger element than)
  Params::element_area=0.001;
@@ -912,14 +911,17 @@ int main(int argc, char **argv)
  // Pin u_alpha everywhere
  CommandLineArgs::specify_command_line_flag("--pininplane");
 
+ // Break swelling symmetry using pressure
+ CommandLineArgs::specify_command_line_flag("--perturb");
+
 
  // Parse command line
  CommandLineArgs::parse_and_assign();
 
  // How many nodes do we want to manually place along the boundaries
  // (roughly length*width/thickness)
- Params::n_long_edge_nodes  = ceil(0.00*Params::L1/Params::thickness) + 2;
- Params::n_short_edge_nodes = ceil(0.00*Params::L2/Params::thickness) + 2;
+ Params::n_long_edge_nodes  = ceil(0.05*Params::L1/Params::thickness) + 2;
+ Params::n_short_edge_nodes = ceil(0.05*Params::L2/Params::thickness) + 2;
  
  // Doc what has actually been specified on the command line
  CommandLineArgs::doc_specified_flags();
@@ -929,7 +931,7 @@ int main(int argc, char **argv)
   problem;
 
  // Set up some problem paramters
- problem.newton_solver_tolerance()=1e-8;
+ problem.newton_solver_tolerance()=1e-10;
  problem.max_residuals()=1e4;
  problem.max_newton_iterations()=10;
 
@@ -947,8 +949,6 @@ int main(int argc, char **argv)
  problem.assign_initial_values_impulsive();
  problem.initialise_dt(dt);
  
- double c_inc = 0.002;
-
  if(CommandLineArgs::command_line_flag_has_been_set("--restart"))
   {
    problem.Doc_steady_info.number()-=1;
@@ -959,28 +959,52 @@ int main(int argc, char **argv)
  problem.steady_newton_solve(); // SOLVE
  problem.doc_solution(true); // AND DOCUMENT
  
+ // if(!CommandLineArgs::command_line_flag_has_been_set("--restart"))
+ //  {
+ //   //   while(Params::p_mag<p_max)
+ //    {
+ //     // INFLATION
+ //   Params::p_mag += p_inc;
+     
+ //     // Pre-inflate the membrane
+ //     oomph_info << "INFLATION STAGE" << std::endl;
+ //     problem.damped_solve(dt, epsilon, false);
+ //    }  
+ //  }
+
+ // Get us close to buckling if we arent restarting from a file
  if(!CommandLineArgs::command_line_flag_has_been_set("--restart"))
   {
-   //   while(Params::p_mag<p_max)
-    {
-     // INFLATION
-   Params::p_mag += p_inc;
-     
-     // Pre-inflate the membrane
-     oomph_info << "INFLATION STAGE" << std::endl;
-     problem.damped_solve(dt, epsilon, false);
-    }  
+   Params::c_swell=0.00027;
+   problem.damped_solve(dt, epsilon, false);
   }
-
+ 
  // Swell the membrane
  oomph_info << "SWELLING STAGE" << std::endl;
- double c_swell_max=0.30;
+ double c_swell_max=0.002;
  while(Params::c_swell<c_swell_max)
   {
+   // Preinflate if we are breaking the symmetry
+   if(CommandLineArgs::command_line_flag_has_been_set("--perturb"))
+    {
+     Params::p_mag += p_inc;
+     problem.damped_solve(dt, epsilon, false);
+    }
+
    Params::c_swell += c_inc;
    oomph_info << "c_swell = " << Params::c_swell << std::endl;
    // bool argument to specify whether we want to doc unsteady time steps.
    problem.damped_solve(dt, epsilon, false);
+   
+   // Deflate post swelling if we inflated beforehand
+   if(CommandLineArgs::command_line_flag_has_been_set("--perturb"))
+    {
+     Params::p_mag -= p_inc;
+     problem.damped_solve(dt, epsilon, false);
+    }
+
+   // Now document
+   problem.doc_solution(true);
   } // End of swelling loop
 
  // Print success
