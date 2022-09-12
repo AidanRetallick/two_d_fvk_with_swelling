@@ -44,6 +44,23 @@ using MathematicalConstants::Pi;
 
 /*                      OUTLINE OF PROBLEM CONSTRUCTION                       */
 // The basic constuction is much the same as the usual order of things in a
+template<class ELEMENT>
+class MyMesh : public virtual TriangleMesh<ELEMENT>
+{
+public:
+ MyMesh<ELEMENT>(TriangleMeshParameters& triangle_mesh_parameters,
+		 TimeStepper *time_stepper_pt=&Mesh::Default_TimeStepper)
+  : TriangleMesh<ELEMENT>(triangle_mesh_parameters, time_stepper_pt)
+ {}
+
+ void update_polyline_representation_from_restart()
+ {
+  oomph_info << "Called MyMesh::update_polyline_representation_from_restart()"
+	     << std::endl
+	     << "           NOT DOING ANYTHING IN THIS FUNCTION" << std::endl;
+ }
+};
+
 // problem. Underneath is the order of actions (with stars next to non actions
 // that are unique to these types of problems).
 // 1.  Setup mesh parameters
@@ -77,12 +94,14 @@ namespace Params
  //Shape of the domain
  double A = 1.0;
  double B = 1.0;
- // The coupling of the stretching energy
- double p_mag = 0;
  double nu = 0.0;
  double mu = 0.0;
  double eta = 0.1;//12*(1-nu*nu);
- 
+
+ // Control parameters
+ double p_mag = 0.0;
+ double c_swell = 0.0;
+
  // Dimensions
  double thickness = 0.0054;
  double L_dim = 5.0e-3;
@@ -141,11 +160,19 @@ namespace Params
   get_pressure(X,pressure[0]);
  }
 
- // Temperature wrapper so we can output the temperature function
+ // Assigns the value of swelling depending on the position (x,y)
+ void get_swelling(const Vector<double>& x, double& swelling)
+ {
+  // Almost uniform swelling with clamped boundaries
+  swelling = c_swell_data_pt->value(0); // * (1 - pow(x[0]/L1,10) - pow(x[1]/L2,10)
+  // + pow( (x[0]*x[1])/(L1*L2) , 10));
+ }
+
+ // Swelling wrapper so we can output the degree of swelling function
  void get_swelling(const Vector<double>& X, Vector<double>& swelling)
  {
   swelling.resize(1);
-  swelling[0]=0;
+  get_swelling(X,swelling[0]);
  }
 
  // Assigns the value of in plane forcing depending on the position (x,y)
@@ -222,6 +249,36 @@ public:
  {
   return Nnewton_iter_taken;
  }
+ /// Temporal error norm function.
+ double global_temporal_error_norm()
+ {
+  double global_error = 0.0;
+  
+  //Find out how many nodes there are in the problem
+  unsigned n_node = mesh_pt()->nnode();
+ 
+  //Loop over the nodes and calculate the estimated error in the values
+  for(unsigned i=0;i<n_node;i++)
+   {
+    double error = 0;
+    Node* node_pt = mesh_pt()->node_pt(i);
+    // Get error in solution: Difference between predicted and actual
+    // value for nodal value 2 (only if we are at a vertex node)
+    if(node_pt->nvalue()>2)
+     {
+      error = node_pt->time_stepper_pt()->
+       temporal_error_in_value(mesh_pt()->node_pt(i),2);
+     }
+    //Add the square of the individual error to the global error
+    global_error += error*error;
+   }
+    
+  // Divide by the number of nodes
+  global_error /= double(n_node);
+ 
+  // Return square root...
+  return sqrt(global_error);
+ }
  
  /// Update after solve (empty)
  void actions_after_newton_solve()
@@ -246,7 +303,46 @@ public:
 		<< maxres            << std::endl;
   newton_stream.close();
  }
+
+ /// Print information about the parameters we are trying to solve for.
+ void actions_before_newton_solve()
+ {
+  // Print some gubbins about parameters
+  oomph_info << "-------------------------------------------------------" << std::endl;
+  oomph_info << "Solving for p = " << Params::p_mag
+	     << "  (" << Params::p_mag*Params::P_dim << "Pa)" << std::endl;
+  oomph_info << "      c_swell = " << Params::c_swell_data_pt->value(0) << std::endl;
+  oomph_info << "     Doc_info = " << Doc_steady_info.number()
+	     << ", " << Doc_unsteady_info.number() << std::endl;
+  oomph_info << "-------------------------------------------------------" << std::endl;
+ }
+
+ /// Remove surface mesh before reading
+ void actions_before_read_unstructured_meshes()
+ {
+  // How many surface elements are in the surface mesh
+  unsigned n_element = Surface_mesh_pt->nelement();
+
+  // Loop over the surface elements
+  for(unsigned e=0;e<n_element;e++)
+   {
+    // Kill surface element
+    delete Surface_mesh_pt->element_pt(e);
+   }
+
+  Surface_mesh_pt->flush_element_and_node_storage();
+
+  rebuild_global_mesh();
+ }
  
+/// Add surface mesh back after reading
+ void actions_after_read_unstructured_meshes()
+ {
+  rebuild_global_mesh();
+  apply_boundary_conditions();
+  complete_problem_setup();
+ }
+
  /// Pin the in-plane displacements and set to zero at centre
  void pin_in_plane_displacements_at_centre_node();
 
@@ -254,23 +350,87 @@ public:
  /// Empty as the boundary conditions stay fixed
  void actions_before_newton_solve()
  {
-  /* Reapply boundary conditions */
+  // Reapply boundary conditions
   apply_boundary_conditions();
  }
 
  /// Doc the solution
- void doc_solution(const std::string& comment="");
+ void doc_solution(const bool steady, const std::string& comment="");
+
+/// Dump problem to disk to allow for restart.
+ void dump_it(ofstream& dump_file)
+ {
+  dump_file << Doc_steady_info.number() << " # steady step number" << std::endl
+	    << Doc_unsteady_info.number() << " # unsteady step number" << std::endl
+	    << Params::p_mag << " # pressure" << std::endl
+	    << Params::c_swell_data_pt->value(0) << " # swelling" << std::endl
+	    << Next_dt << " # suggested next timestep" << std::endl;
+  
+  // Call generic dump()
+  Problem::dump(dump_file); 
+ }
+ 
+ /// Read problem for restart from specified restart file.
+ void restart(ifstream& restart_file)
+ {
+  string input_string;
+  
+  // Read line up to termination sign
+  getline(restart_file,input_string,'#');
+  // Ignore rest of line
+  restart_file.ignore(80,'\n');
+  // Read in steady step number
+  Doc_steady_info.number()=unsigned(atof(input_string.c_str()));
+  Doc_steady_info.number()++;
+  
+  getline(restart_file,input_string,'#');
+  // Ignore rest of line
+  restart_file.ignore(80,'\n');
+  // Read in unsteady step number
+  Doc_unsteady_info.number()=unsigned(atof(input_string.c_str()));
+  Doc_unsteady_info.number()=0; //for now [witnessme]
+  
+  getline(restart_file,input_string,'#');
+  // Ignore rest of line
+  restart_file.ignore(80,'\n');
+  // Read in pressure value
+  Params::p_mag=double(atof(input_string.c_str()));
+
+  getline(restart_file,input_string,'#');
+  // Ignore rest of line
+  restart_file.ignore(80,'\n');
+  // Read in steady step number
+  Params::c_swell=double(atof(input_string.c_str()));
+  
+  // Read line up to termination sign
+  getline(restart_file,input_string,'#');
+  // Ignore rest of line
+  restart_file.ignore(80,'\n'); 
+  // Read suggested next timestep
+  Next_dt=double(atof(input_string.c_str()));
+ 
+  // Refine the mesh and read in the generic problem data
+  Problem::read(restart_file);
+ 
+ } // end of restart
+ 
 
  /// \short Overloaded version of the problem's access function to
  /// the mesh. Recasts the pointer to the base Mesh object to
- /// the actual mesh type.
- TriangleMesh<ELEMENT>* mesh_pt()
+ MyMesh<ELEMENT>* mesh_pt()
  {
   return Bulk_mesh_pt;
  }
 
  /// Doc info object for labeling output
- DocInfo Doc_info;
+ double next_dt()
+ {
+  return Next_dt;
+ }
+
+ /// Doc info object for labeling all output
+ DocInfo Doc_steady_info;
+ DocInfo Doc_unsteady_info;
 
 private:
 
@@ -310,37 +470,6 @@ private:
  /// \short Helper function to (re-)set boundary condition
  /// and complete the build of  all elements
  void complete_problem_setup();
-
- /// Temporal error norm function.
- double global_temporal_error_norm()
- {
-  double global_error = 0.0;
-  
-  //Find out how many nodes there are in the problem
-  unsigned n_node = mesh_pt()->nnode();
- 
-  //Loop over the nodes and calculate the estimated error in the values
-  for(unsigned i=0;i<n_node;i++)
-   {
-    double error = 0;
-    Node* node_pt = mesh_pt()->node_pt(i);
-    // Get error in solution: Difference between predicted and actual
-    // value for nodal value 2 (only if we are at a vertex node)
-    if(node_pt->nvalue()>2)
-     {
-      error = node_pt->time_stepper_pt()->
-       temporal_error_in_value(mesh_pt()->node_pt(i),2);
-     }
-    //Add the square of the individual error to the global error
-    global_error += error*error;
-   }
-    
-  // Divide by the number of nodes
-  global_error /= double(n_node);
- 
-  // Return square root...
-  return sqrt(global_error);
- }
  
   /// Trace file to document norm of solution
   ofstream Trace_file_dim, Trace_file_nondim;
@@ -383,7 +512,6 @@ UnstructuredFvKProblem<ELEMENT>::UnstructuredFvKProblem()
  Element_area(Params::element_area)
 {
  add_time_stepper_pt(new BDF<2>(true));
- Problem::Always_take_one_newton_step = true;
  
  Problem::Always_take_one_newton_step = true;
  // Build the mesh
@@ -420,8 +548,28 @@ UnstructuredFvKProblem<ELEMENT>::UnstructuredFvKProblem()
  strcpy(filename, (Params::output_dir + "/trace_dim.dat").c_str());
  Trace_file_dim.open(filename);
 
+#ifdef OOMPH_HAS_MUMPS
+ // Let everyone know we are going to use MUMPS
+ oomph_info << std::endl << "Using MUMPS solver" << std::endl << std::endl;
+ 
+ // Change solver
+ linear_solver_pt()=new MumpsSolver;
+
+ // Shut up
+ dynamic_cast<MumpsSolver*>(linear_solver_pt())->
+  enable_suppress_warning_about_MPI_COMM_WORLD();
+
+#endif
+
  oomph_info << "Number of equations: "
 	    << assign_eqn_numbers() << '\n';
+
+ // Output the mesh
+ strcpy(filename, (Params::output_dir + "/mesh.dat").c_str());
+ ofstream meshfile(filename);
+ Problem::mesh_pt()->output(meshfile);
+ meshfile.close();
+
 } // end Constructor
 
 /// Set up and build the mesh
@@ -597,6 +745,7 @@ void UnstructuredFvKProblem<ELEMENT>::complete_problem_setup()
     
    //Set the pressure function pointers and the physical constants
    el_pt->pressure_fct_pt() = &Params::get_pressure;
+   el_pt->swelling_fct_pt() = &Params::get_swelling;
    el_pt->in_plane_forcing_fct_pt() = &Params::get_in_plane_force;
    // There is no error metric in this case
    el_pt->error_metric_fct_pt() = &Params::axiasymmetry_metric;
@@ -604,6 +753,22 @@ void UnstructuredFvKProblem<ELEMENT>::complete_problem_setup()
    el_pt->mu_pt() = &Params::mu;
    el_pt->eta_pt() = &Params::eta;
   }
+
+ // Do we want to pin in-plane displacement?
+ if(CommandLineArgs::command_line_flag_has_been_set("--pininplane"))
+  {
+   cout << "gonna pin em" << endl;
+   // Pin the in-plane displacements
+   unsigned nnode = mesh_pt()->nnode();
+   for(unsigned inode=0; inode<nnode; inode++)
+    {
+     mesh_pt()->node_pt(inode)->pin(0);
+     mesh_pt()->node_pt(inode)->pin(1);
+    }
+   cout << "successfully pinned" << endl;
+   assign_eqn_numbers();
+  }
+ 
  // Set the boundary conditions
  apply_boundary_conditions();
 }
