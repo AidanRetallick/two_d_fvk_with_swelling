@@ -1,10 +1,11 @@
 # Name of executables: The prefix "noinst" means the executables don't
 # have to be installed anywhere.
-noinst_PROGRAMS = square_free_swelling      \
-                  clamped_square_inflation  \
-                  rectangular_plate_fvk     \
-                  infinite_strip_fvk        \
-                  euler_column_buckling_fvk \
+noinst_PROGRAMS = square_free_swelling            \
+                  clamped_square_inflation        \
+                  rectangular_plate_fvk           \
+                  rectangular_pressure_cycle_fvk  \
+                  infinite_strip_fvk              \
+                  euler_column_buckling_fvk       \
                   circular_disc_fvk
 include $(top_srcdir)/config/makefile_templates/demo_drivers
 #---------------------------------------------------------------------------
@@ -18,6 +19,9 @@ clamped_square_inflation_SOURCES = \
 
 rectangular_plate_fvk_SOURCES = \
  rectangular_plate_foeppl_von_karman.cc
+
+rectangular_pressure_cycle_fvk_SOURCES = \
+ rectangular_pressure_cycle_foeppl_von_karman.cc
 
 infinite_strip_fvk_SOURCES = \
  infinite_strip_foeppl_von_karman.cc
@@ -34,6 +38,8 @@ square_free_swelling_LDADD = -L@libdir@ -lC1_foeppl_von_karman \
 clamped_square_inflation_LDADD = -L@libdir@ -lC1_foeppl_von_karman \
  -lC1_basis -lgeneric $(EXTERNAL_LIBS) $(FLIBS)
 rectangular_plate_fvk_LDADD = -L@libdir@ -lC1_foeppl_von_karman \
+ -lC1_basis -lgeneric $(EXTERNAL_LIBS) $(FLIBS)
+rectangular_pressure_cycle_fvk_LDADD = -L@libdir@ -lC1_foeppl_von_karman \
  -lC1_basis -lgeneric $(EXTERNAL_LIBS) $(FLIBS)
 infinite_strip_fvk_LDADD = -L@libdir@ -lC1_foeppl_von_karman \
  -lC1_basis -lgeneric $(EXTERNAL_LIBS) $(FLIBS)
