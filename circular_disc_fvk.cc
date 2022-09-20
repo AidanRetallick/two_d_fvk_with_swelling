@@ -1170,7 +1170,7 @@ int main(int argc, char **argv)
 
  // Doc what has actually been specified on the command line
  CommandLineArgs::doc_specified_flags();
- UnstructuredFvKProblem<ThermoFoepplVonKarmanC1CurvedBellElement<4>>
+ UnstructuredFvKProblem<DampedFoepplVonKarmanC1CurvedBellElement<4>>
   problem;
  
  if(CommandLineArgs::command_line_flag_has_been_set("--pininplane"))

@@ -729,7 +729,7 @@ int main(int argc, char **argv)
 
  // Doc what has actually been specified on the command line
  CommandLineArgs::doc_specified_flags();
- UnstructuredFvKProblem<ThermoFoepplVonKarmanC1CurvedBellElement<4>>
+ UnstructuredFvKProblem<DampedFoepplVonKarmanC1CurvedBellElement<4>>
   problem(element_area);
 
  // Set up some problem paramters

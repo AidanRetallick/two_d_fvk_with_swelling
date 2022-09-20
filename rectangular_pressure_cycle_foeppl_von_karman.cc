@@ -932,7 +932,7 @@ int main(int argc, char **argv)
  CommandLineArgs::doc_specified_flags();
 
  // CREATE THE PROBLEM
- UnstructuredFvKProblem<ThermoFoepplVonKarmanC1CurvedBellElement<4>>
+ UnstructuredFvKProblem<DampedFoepplVonKarmanC1CurvedBellElement<4>>
   problem;
 
  // Set up some problem paramters
