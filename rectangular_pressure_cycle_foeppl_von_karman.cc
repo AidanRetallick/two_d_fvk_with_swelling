@@ -600,50 +600,74 @@ void UnstructuredFvKProblem<ELEMENT>::complete_problem_setup()
 template<class ELEMENT>
 void UnstructuredFvKProblem<ELEMENT>::apply_boundary_conditions()
 {
+  // In-plane dofs:
+ // |  0  |  1  |
+ // |  ux |  uy |
+ // Possible boundary conditions on the in-plane displacement
+ static const Vector<unsigned> free{};
+ static const Vector<unsigned> pin_ux_dofs{0};
+ static const Vector<unsigned> pin_uy_dofs{1};
+ static const Vector<unsigned> pin_inplane_dofs{0,1};
+ 
+ // Out-of-plane dofs:
+ // |  0  |  1  |  2  |  3  |  4  |  5  |
+ // |  w  | w_x | w_y | w_xx| w_xy| w_yy|
+ // Possible boundary conditions depending on whether an edge is x-normal or
+ // y-normal
+ static const Vector<unsigned> resting_pin_xn_dofs{0,2,5};
+ static const Vector<unsigned> resting_pin_yn_dofs{0,1,3};
+ static const Vector<unsigned> sliding_clamp_xn_dofs{1,4};
+ static const Vector<unsigned> sliding_clamp_yn_dofs{2,4};
+ static const Vector<unsigned> true_clamp_xn_dofs{0,1,2,4,5};
+ static const Vector<unsigned> true_clamp_yn_dofs{0,1,2,3,4};
+ 
+ // Vectors to store which boundary conditions we are applying to each edge.
+ Vector<Vector<unsigned>> pinned_u_dofs(4);
+ Vector<Vector<unsigned>> pinned_w_dofs(4);
+ 
+ // Choose BCs for each boundary
+ pinned_u_dofs[0] = pin_inplane_dofs;
+ pinned_u_dofs[1] = pin_inplane_dofs;
+ pinned_u_dofs[2] = pin_inplane_dofs;
+ pinned_u_dofs[3] = pin_inplane_dofs;
+ pinned_w_dofs[0] = resting_pin_yn_dofs;
+ pinned_w_dofs[1] = resting_pin_xn_dofs;
+ pinned_w_dofs[2] = resting_pin_yn_dofs;
+ pinned_w_dofs[3] = resting_pin_xn_dofs;
+ 
  // Set the boundary conditions
  unsigned n_bound = Bulk_mesh_pt->nboundary();
  for(unsigned b=0;b<n_bound;b++)
   {
+   // Number of elements on b
    const unsigned nb_element = Bulk_mesh_pt->nboundary_element(b);
+   // Number of each type of dof are we pinning on b
+   const unsigned n_pinned_u_dofs = pinned_u_dofs[b].size();
+   const unsigned n_pinned_w_dofs = pinned_w_dofs[b].size();
+
+   // Loop over the elements on boundary b
    for(unsigned e=0; e<nb_element; e++)
     {
      // Get pointer to bulk element adjacent to b
      ELEMENT* el_pt =
       dynamic_cast<ELEMENT*>(Bulk_mesh_pt->boundary_element_pt(b,e));
 
-     // Pin in-plane dofs
-     el_pt->fix_in_plane_displacement_dof(0, b, Params::get_null_fct);
-     el_pt->fix_in_plane_displacement_dof(1, b, Params::get_null_fct);
-    
-
-     // Out-of-plane dofs:
-     //   0 |  1  |  2  |  3  |  4  |  5
-     //   w | w_x | w_y | w_xx| w_xy| w_yy
-     for(unsigned idof=0; idof<6; ++idof)
+     // Pin in-plane dofs at edge b
+     for(unsigned i=0; i<n_pinned_u_dofs; i++)
       {
-       // Clamp x-normal edges (left and right)
-       if(b%2==1)
-	{
-	 // Pin all but the second x-derivative. (x derivativeS if pinned)
-	 if(idof!=1&&idof!=3)
-	  {
-	   el_pt->fix_out_of_plane_displacement_dof(idof, b,
-						    Params::get_null_fct);
-	  }
-	}
-       // Clamp y-normal edges (top and bottom)
-       if(b%2==0)
-	{
-	 // Pin all but the second y-derivative. (y derivativeS if pinned)
-	 if(idof!=2&&idof!=5)
-	  {
-	   el_pt->fix_out_of_plane_displacement_dof(idof, b,
-						    Params::get_null_fct);
-	  }
-	}
+       unsigned idof=pinned_u_dofs[b][i];
+       el_pt->fix_in_plane_displacement_dof(idof, b, Params::get_null_fct);
       }
-    }
-  }
+     // Pin out-of-plane dofs at edge b
+     for(unsigned i=0; i<n_pinned_w_dofs; i++)
+      {
+       unsigned idof=pinned_w_dofs[b][i];
+       el_pt->fix_out_of_plane_displacement_dof(idof, b, Params::get_null_fct);
+      }
+     
+    } // end for loop over elements on b
+  } // end for loop over boundaries
+
 } // end set bc
 
 template<class ELEMENT>
