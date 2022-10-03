@@ -72,6 +72,7 @@ namespace Params
 
  // Control parameters
  double p_mag = 0.0;
+ double p_force = 0.0;
  double c_swell = 0.0;
  Data *c_swell_data_pt;
 
@@ -100,6 +101,20 @@ namespace Params
  {
   pressure.resize(1);
   get_pressure(X,pressure[0]);
+ }
+
+ // Assigns the value of pressure depending on the position (x,y)
+ void get_forced_pressure(const Vector<double>& x, double& pressure)
+ {
+  // Constant pressure
+  pressure = p_mag * (1 - p_force*exp(-40.0*x[0]*x[0]));
+ }
+
+ // Pressure wrapper so we can output the pressure function
+ void get_forced_pressure(const Vector<double>& X, Vector<double>& pressure)
+ {
+  pressure.resize(1);
+  get_forced_pressure(X,pressure[0]);
  }
 
  // Assigns the value of swelling depending on the position (x,y)
@@ -566,7 +581,7 @@ void UnstructuredFvKProblem<ELEMENT>::complete_problem_setup()
    ELEMENT* el_pt = dynamic_cast<ELEMENT*>(Bulk_mesh_pt->element_pt(e));
 
    //Set the pressure & temperature function pointers and the physical constants
-   el_pt->pressure_fct_pt() = &Params::get_pressure;
+   el_pt->pressure_fct_pt() = &Params::get_forced_pressure;
    el_pt->swelling_fct_pt() = &Params::get_swelling;
    el_pt->in_plane_forcing_fct_pt() = &Params::get_in_plane_force;
    // There is no error metric in this case
@@ -989,18 +1004,16 @@ int main(int argc, char **argv)
  problem.doc_solution(true); // AND DOCUMENT
 
  // Cycle the pressure
- p_inc=4800;
- while(Params::p_mag > 50)
+ p_inc=1.0;
+ while(Params::p_force < 5)
   {
-   Params::p_mag+=p_inc;
+   Params::p_force+=p_inc;
    problem.damped_solve(dt,epsilon,false);
-   problem.doc_solution(true);
   }
- while(Params::p_mag > 50)
+ while(Params::p_mag > 0)
   {
-   Params::p_mag+=p_inc;
-   problem.damped_solve(dt,epsilon,false);
-   problem.doc_solution(true);
+   Params::p_force-=p_inc;
+   problem.damped_solve(dt,epsilon,true);
   }
 
  // Shut down oomph-lib's MPI
