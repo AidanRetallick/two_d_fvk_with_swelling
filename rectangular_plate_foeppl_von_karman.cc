@@ -58,7 +58,7 @@ public:
 	     << "           NOT DOING ANYTHING IN THIS FUNCTION" << std::endl;
  }
 };
- 
+
 namespace Params
 {
  // Plate parameters
@@ -74,10 +74,11 @@ namespace Params
  double p_mag = 0.0;
  double c_swell = 0.0;
  Data *c_swell_data_pt;
+ double c_swell_max=0.3;
 
  // Dimensions
  double L_dim = 5.0e-3;
- double E_dim = 1.2139e6;
+ double E_dim = 1.67e6;
  double P_dim = E_dim * thickness / eta;
 
  // Mesh parameters
@@ -85,9 +86,10 @@ namespace Params
  unsigned n_long_edge_nodes=0;
  unsigned n_short_edge_nodes=0;
 
- // Output directory
+ // Outputs
  string output_dir="RESLT";
-
+ ofstream* pvd_stream_pt;
+ 
  // Assigns the value of pressure depending on the position (x,y)
  void get_pressure(const Vector<double>& x, double& pressure)
  {
@@ -181,6 +183,7 @@ public:
  {
   return Nnewton_iter_taken;
  }
+ 
  /// Temporal error norm function.
  double global_temporal_error_norm()
  {
@@ -211,6 +214,16 @@ public:
   // Return square root...
   return sqrt(global_error);
  }
+
+ void enable_xz_profiles()
+  {
+   STORE_XZ_PROFILES = true;
+  }
+ 
+ void disable_xz_profiles()
+  {
+   STORE_XZ_PROFILES = false;
+  }
  
  /// Update after solve (empty)
  void actions_after_newton_solve()
@@ -393,6 +406,9 @@ private:
  /// to (or read from) restart file)
  double Next_dt=0.1;
 
+ /// Do we want to locate_zeta along the centreline and store the profile?
+ bool STORE_XZ_PROFILES=false;
+ 
 }; // end_of_problem_class
 
 /// Constructor definition
@@ -600,50 +616,74 @@ void UnstructuredFvKProblem<ELEMENT>::complete_problem_setup()
 template<class ELEMENT>
 void UnstructuredFvKProblem<ELEMENT>::apply_boundary_conditions()
 {
+  // In-plane dofs:
+ // |  0  |  1  |
+ // |  ux |  uy |
+ // Possible boundary conditions on the in-plane displacement
+ static const Vector<unsigned> free{};
+ static const Vector<unsigned> pin_ux_dofs{0};
+ static const Vector<unsigned> pin_uy_dofs{1};
+ static const Vector<unsigned> pin_inplane_dofs{0,1};
+ 
+ // Out-of-plane dofs:
+ // |  0  |  1  |  2  |  3  |  4  |  5  |
+ // |  w  | w_x | w_y | w_xx| w_xy| w_yy|
+ // Possible boundary conditions depending on whether an edge is x-normal or
+ // y-normal
+ static const Vector<unsigned> resting_pin_xn_dofs{0,2,5};
+ static const Vector<unsigned> resting_pin_yn_dofs{0,1,3};
+ static const Vector<unsigned> sliding_clamp_xn_dofs{1,4};
+ static const Vector<unsigned> sliding_clamp_yn_dofs{2,4};
+ static const Vector<unsigned> true_clamp_xn_dofs{0,1,2,4,5};
+ static const Vector<unsigned> true_clamp_yn_dofs{0,1,2,3,4};
+ 
+ // Vectors to store which boundary conditions we are applying to each edge.
+ Vector<Vector<unsigned>> pinned_u_dofs(4);
+ Vector<Vector<unsigned>> pinned_w_dofs(4);
+ 
+ // Choose BCs for each boundary
+ pinned_u_dofs[0] = pin_inplane_dofs;
+ pinned_u_dofs[1] = pin_inplane_dofs;
+ pinned_u_dofs[2] = pin_inplane_dofs;
+ pinned_u_dofs[3] = pin_inplane_dofs;
+ pinned_w_dofs[0] = resting_pin_yn_dofs;
+ pinned_w_dofs[1] = resting_pin_xn_dofs;
+ pinned_w_dofs[2] = resting_pin_yn_dofs;
+ pinned_w_dofs[3] = resting_pin_xn_dofs;
+ 
  // Set the boundary conditions
  unsigned n_bound = Bulk_mesh_pt->nboundary();
  for(unsigned b=0;b<n_bound;b++)
   {
+   // Number of elements on b
    const unsigned nb_element = Bulk_mesh_pt->nboundary_element(b);
+   // Number of each type of dof are we pinning on b
+   const unsigned n_pinned_u_dofs = pinned_u_dofs[b].size();
+   const unsigned n_pinned_w_dofs = pinned_w_dofs[b].size();
+
+   // Loop over the elements on boundary b
    for(unsigned e=0; e<nb_element; e++)
     {
      // Get pointer to bulk element adjacent to b
      ELEMENT* el_pt =
       dynamic_cast<ELEMENT*>(Bulk_mesh_pt->boundary_element_pt(b,e));
 
-     // Pin in-plane dofs
-     el_pt->fix_in_plane_displacement_dof(0, b, Params::get_null_fct);
-     el_pt->fix_in_plane_displacement_dof(1, b, Params::get_null_fct);
-    
-
-     // Out-of-plane dofs:
-     //   0 |  1  |  2  |  3  |  4  |  5
-     //   w | w_x | w_y | w_xx| w_xy| w_yy
-     for(unsigned idof=0; idof<6; ++idof)
+     // Pin in-plane dofs at edge b
+     for(unsigned i=0; i<n_pinned_u_dofs; i++)
       {
-       // Clamp x-normal edges (left and right)
-       if(b%2==1)
-	{
-	 // Pin all but the second x-derivative. (x derivativeS if pinned)
-	 if(idof!=1&&idof!=3)
-	  {
-	   el_pt->fix_out_of_plane_displacement_dof(idof, b,
-						    Params::get_null_fct);
-	  }
-	}
-       // Clamp y-normal edges (top and bottom)
-       if(b%2==0)
-	{
-	 // Pin all but the second y-derivative. (y derivativeS if pinned)
-	 if(idof!=2&&idof!=5)
-	  {
-	   el_pt->fix_out_of_plane_displacement_dof(idof, b,
-						    Params::get_null_fct);
-	  }
-	}
+       unsigned idof=pinned_u_dofs[b][i];
+       el_pt->fix_in_plane_displacement_dof(idof, b, Params::get_null_fct);
       }
-    }
-  }
+     // Pin out-of-plane dofs at edge b
+     for(unsigned i=0; i<n_pinned_w_dofs; i++)
+      {
+       unsigned idof=pinned_w_dofs[b][i];
+       el_pt->fix_out_of_plane_displacement_dof(idof, b, Params::get_null_fct);
+      }
+     
+    } // end for loop over elements on b
+  } // end for loop over boundaries
+
 } // end set bc
 
 template<class ELEMENT>
@@ -653,13 +693,30 @@ void UnstructuredFvKProblem<ELEMENT>::damped_solve(double dt,
 {
  bool STEADY = false;
  double R = Params::relevant_energy_factor;
+
+ // If we are documenting the damped stage, create an initial state before any
+ // unsteady solves have been done.
+ if(doc_unsteady)
+  {
+   doc_solution(false);
+  }
+ else
+  {
+   Doc_unsteady_info.number()++;
+  }
+ 
  while(!STEADY)
   {
    oomph_info << "NEW DAMPED PSEUDO-TIME STEP" << std::endl;
-   // Try get us close to a steady solution
+
+   // Try get us close to a steady solution by solving the damped version of the
+   // equations.
    double dt_next =
     adaptive_unsteady_newton_solve(dt,epsilon);
    dt = dt_next;
+
+   // If we are documenting the unsteady solutions then do so, else just
+   // just increase the unsteady step counter.
    if(doc_unsteady)
     {
      doc_solution(false);
@@ -682,7 +739,7 @@ void UnstructuredFvKProblem<ELEMENT>::damped_solve(double dt,
     }
    oomph_info << "Elastic energy: " << elastic_energy << std::endl
 	      << "Kinetic energy: " << kinetic_energy << std::endl;
-   if(R*abs(kinetic_energy) < abs(elastic_energy))
+   if(R*abs(kinetic_energy) <= abs(elastic_energy))
     {
      oomph_info << "ALMOST STEADY SO ATTEMPT A STEADY SOLVE" << std::endl;
      store_current_dof_values();
@@ -693,8 +750,6 @@ void UnstructuredFvKProblem<ELEMENT>::damped_solve(double dt,
 	{
 	 doc_solution(false);
 	}
-       time()=0.0;
-       doc_solution(true);
        STEADY=true;
       }
      catch(OomphLibError& error)
@@ -791,6 +846,10 @@ void UnstructuredFvKProblem<ELEMENT>::doc_solution(bool steady,
    some_file << "TEXT X = 22, Y = 92, CS=FRAME T = \""
 	     << comment << "\"\n";
    some_file.close();
+   ParaviewHelper::write_pvd_information(*(Params::pvd_stream_pt),
+					 filename,
+					 time());
+
 
    // Write the pressure, degree of swelling and
    // deflection to the trace file
@@ -826,7 +885,54 @@ void UnstructuredFvKProblem<ELEMENT>::doc_solution(bool steady,
 		     << Params::c_swell_data_pt->value(0) << " "
 		     << w_centre[0]*Params::L_dim         << endl;
 
+   // Are we storing XZ profile slices?
+   if(steady && STORE_XZ_PROFILES)
+    {
+     // Number of evenly spaced slices between y=0(included) and y=1(not included)
+     unsigned n_yplanes=10;
+     // Number of evenly spaced points per slice
+     unsigned n_ppoint=1001;
+     Vector<double> ppoint(2,0.0), ppoint_s(2,0.0), z(8,0.0);
+     GeomObject* ppoint_element_pt;
+     double h = Params::L1/(n_ppoint-1.0);
+     
+     // Loop over the y-values for the xz slice planes
+     for(unsigned i=0; i<n_yplanes; i++)
+      {
+       double yi = 0.5 * (double)i / (double)10.0;
+     
+       // Store a profile deflection slice through y=yi
+       //-----------------------------------------------------
+       sprintf(filename,
+	       "%s/xz_profile_y%.2f_%i.dat",
+	       Params::output_dir.c_str(),
+	       yi,
+	       Doc_steady_info.number());
+       some_file.open(filename);
+     
+       ppoint[0]=-Params::L1/2.0;
+       ppoint[1]=yi;
+       for(unsigned j=0; j<=n_ppoint; j++)
+	{
+	 for(unsigned i=0; i<n_element; i++)
+	  {
+	   dynamic_cast<ELEMENT*>(Bulk_mesh_pt->element_pt(i))
+	    ->locate_zeta(ppoint, ppoint_element_pt, ppoint_s);
+	   if(ppoint_element_pt!=NULL)
+	    {
+	     z = dynamic_cast<ELEMENT*>(ppoint_element_pt)
+	      ->interpolated_u_foeppl_von_karman(ppoint_s);
+	     some_file << ppoint[0]+z[6] << " " << ppoint[1]+z[7] << " " << z[0] << std::endl;
+	     break;
+	    }
+	  }
+	 ppoint[0]+=h;
+	}
+       some_file.close();
+      }
+    }
   }
+ 
  // Increment the doc_info numbers
  if(steady)
   {
@@ -904,14 +1010,14 @@ int main(int argc, char **argv)
 					    &Params::eta);
 
  // Applied Pressure
- double p_inc = 24000.0;
+ double p_inc_dim = 24000.0;
  CommandLineArgs::specify_command_line_flag("--p",
-					    &p_inc);
+					    &p_inc_dim);
 
- // Temperature increase
- CommandLineArgs::specify_command_line_flag("--t",
-					    &Params::c_swell);
-
+ // Maximum degree of swelling
+ CommandLineArgs::specify_command_line_flag("--c_max",
+					    &Params::c_swell_max);
+ 
  // Element Area (no larger element than)
  Params::element_area=0.001;
  CommandLineArgs::specify_command_line_flag("--element_area",
@@ -950,23 +1056,30 @@ int main(int argc, char **argv)
    restart_stream.close();
   }
 
+ double p_inc = p_inc_dim / Params::P_dim;
  double dt = problem.next_dt();
  double epsilon = 1.0e-3;
  problem.assign_initial_values_impulsive();
  problem.initialise_dt(dt);
- 
+
+ problem.enable_xz_profiles();
  double c_inc = 0.002;
 
  if(CommandLineArgs::command_line_flag_has_been_set("--restart"))
   {
    problem.Doc_steady_info.number()-=1;
   }
+
+ // Open the pvd file
+ ofstream pvd_stream;
+ pvd_stream.open("steady_solns.pvd");
+ ParaviewHelper::write_pvd_header(pvd_stream);
+ Params::pvd_stream_pt = &pvd_stream;
  
  oomph_info << "DO AN INITIAL STATE SOLVE" << std::endl;
  // INITIAL SOLVE
  problem.steady_newton_solve(); // SOLVE
- problem.doc_solution(true); // AND DOCUMENT
-
+ 
  if(!CommandLineArgs::command_line_flag_has_been_set("--restart"))
   {
    //   while(Params::p_mag<p_max)
@@ -977,21 +1090,26 @@ int main(int argc, char **argv)
      // Pre-inflate the membrane
      oomph_info << "INFLATION STAGE" << std::endl;
      problem.damped_solve(dt, epsilon, false);
+     problem.doc_solution(true); // AND DOCUMENT
     }  
   }
  
- // Swell the membrane
- oomph_info << "SWELLING STAGE" << std::endl;
- double c_swell_max=0.30;
- while(Params::c_swell<c_swell_max)
-  {
-   Params::c_swell += c_inc;
-   Params::c_swell_data_pt->set_value(0, Params::c_swell);
-   oomph_info << "c_swell = " << Params::c_swell << std::endl;
-   // bool argument to specify whether we want to doc unsteady time steps.
-   problem.damped_solve(dt, epsilon, false);
-  } // End of swelling loop
+ // // Swell the membrane
+ // oomph_info << "SWELLING STAGE" << std::endl;
+ // while(Params::c_swell<Params::c_swell_max)
+ //  {
+ //   Params::c_swell += c_inc;
+ //   Params::c_swell_data_pt->set_value(0, Params::c_swell);
+ //   oomph_info << "c_swell = " << Params::c_swell << std::endl;
+ //   // bool argument to specify whether we want to doc unsteady time steps.
+ //   problem.damped_solve(dt, epsilon, false);
+ //   problem.doc_solution(true);
+ //  } // End of swelling loop
 
+ // Close the pvd file
+ ParaviewHelper::write_pvd_footer(pvd_stream);
+ pvd_stream.close();
+ 
  // Print success
  oomph_info<<"Exiting Normally\n";
 

@@ -78,7 +78,7 @@ namespace Params
 
  // Dimensions
  double L_dim = 5.0e-3;
- double E_dim = 1.2139e6;
+ double E_dim = 1.67e6;
  double P_dim = E_dim * thickness / eta;
 
  // Mesh parameters
@@ -103,14 +103,31 @@ namespace Params
   get_pressure(X,pressure[0]);
  }
 
- // Assigns the value of pressure depending on the position (x,y)
+ // Assigns the value of perturbed folding pressure depending on the position (x,y)
+ // Currently this is done with three gaussians, of the form -exp(-(ax)^2),
+ // b distance apart, and offset vertically by a proportion c (to add
+ // additional positive pressure in between gaussians)
  void get_forced_pressure(const Vector<double>& x, double& pressure)
- {
+ {  
+  // Gaussian width factor
+  double a=10;
+
+  // Inter-gaussian distance
+  double b=1.5;
+  
+  // Inter-gaussian pressure offset
+  double c=0.1;
+  
   // Constant pressure
-  pressure = p_mag * (1 - p_force*exp(-40.0*x[0]*x[0]));
+  pressure = p_mag * (1 + p_force*(c
+				   - exp(-pow(a*(x[0]),2))
+				   - exp(-pow(a*(x[0]+b),2))
+				   - exp(-pow(a*(x[0]-b),2))
+				   )
+		      );
  }
 
- // Pressure wrapper so we can output the pressure function
+ // Pressure wrapper so we can output the perturbed pressure function
  void get_forced_pressure(const Vector<double>& X, Vector<double>& pressure)
  {
   pressure.resize(1);
@@ -721,7 +738,7 @@ void UnstructuredFvKProblem<ELEMENT>::damped_solve(double dt,
     }
    oomph_info << "Elastic energy: " << elastic_energy << std::endl
 	      << "Kinetic energy: " << kinetic_energy << std::endl;
-   if(R*abs(kinetic_energy) < abs(elastic_energy))
+   if(R*abs(kinetic_energy) <= abs(elastic_energy))
     {
      oomph_info << "ALMOST STEADY SO ATTEMPT A STEADY SOLVE" << std::endl;
      store_current_dof_values();
@@ -1000,21 +1017,22 @@ int main(int argc, char **argv)
  
  oomph_info << "DO AN INITIAL STATE SOLVE" << std::endl;
  // INITIAL SOLVE
- problem.steady_newton_solve(); // SOLVE
+ problem.damped_solve(dt,epsilon,false); // SOLVE
  problem.doc_solution(true); // AND DOCUMENT
 
  // Cycle the pressure
- p_inc=1.0;
- while(Params::p_force < 5)
+ p_inc=100.0/Params::P_dim;
+ while(Params::p_mag < 1499.0/Params::P_dim)
   {
-   Params::p_force+=p_inc;
+   Params::p_mag+=p_inc;
    problem.damped_solve(dt,epsilon,false);
+   problem.doc_solution(true);
   }
- while(Params::p_mag > 0)
-  {
-   Params::p_force-=p_inc;
-   problem.damped_solve(dt,epsilon,true);
-  }
+ // while(Params::p_mag > 0.0)
+ //  {
+ //   Params::p_mag-=p_inc;
+ //   problem.damped_solve(dt,epsilon,true);
+ //  }
 
  // Shut down oomph-lib's MPI
  MPI_Helpers::finalize();
